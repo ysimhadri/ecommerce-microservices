@@ -1,0 +1,56 @@
+# Establishes the convention every future service in services/ will join:
+# its own container, on this shared network, with its own datastore.
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: auth-postgres
+    environment:
+      POSTGRES_DB: ${DB_NAME:-authdb}
+      POSTGRES_USER: ${DB_USERNAME:-authuser}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-authpass}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-authuser} -d ${DB_NAME:-authdb}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - ecommerce-net
+
+  auth-service:
+    build:
+      context: ./services/auth-service
+    container_name: auth-service
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-authdb}
+      DB_USERNAME: ${DB_USERNAME:-authuser}
+      DB_PASSWORD: ${DB_PASSWORD:-authpass}
+      JWT_SECRET: ${JWT_SECRET:-dev-only-change-me-auth-service-hs256-signing-secret-32bytes+}
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      # No actuator dependency in this service, so just confirm the HTTP
+      # port is accepting and answering requests (any response - even a
+      # 405 for GET on a POST-only route - proves Spring Boot is up;
+      # wget's exit code 4 means "could not connect" and is the only
+      # failure case here).
+      test: ["CMD-SHELL", "wget -qO- -T 3 http://localhost:8080/api/v1/auth/login >/dev/null 2>&1; test $? -ne 4"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - ecommerce-net
+
+volumes:
+  postgres_data:
+
+networks:
+  ecommerce-net:
+    driver: bridge
