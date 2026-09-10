@@ -1,0 +1,33 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: product-catalog-service
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:catalogdb}
+    username: ${DB_USERNAME:cataloguser}
+    password: ${DB_PASSWORD:catalogpass}
+  jpa:
+    open-in-view: false
+    hibernate:
+      # Schema comes solely from Flyway migrations; JPA only validates the
+      # entity mapping against it at startup - it never generates DDL.
+      ddl-auto: validate
+    properties:
+      hibernate:
+        format_sql: true
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  cache:
+    type: caffeine
+    cache-names: categories, products
+    caffeine:
+      # Bounded, in-process, read-optimized cache for the query side (see
+      # CacheConfig) - no extra infrastructure to run for a v1 service.
+      spec: maximumSize=500,expireAfterWrite=5m
+
+logging:
+  level:
+    com.ecommerce.catalog: INFO

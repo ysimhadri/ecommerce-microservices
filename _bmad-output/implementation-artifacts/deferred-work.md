@@ -1,8 +1,12 @@
 # Deferred Work
 
-- source_spec: none
-  summary: Product Catalog Service — product listings, search, and categories demonstrating a CQRS/read-optimized store with caching.
+## Done
+
+- summary: Product Catalog Service — product listings, search, and categories demonstrating a CQRS/read-optimized store with caching.
   evidence: Split from the original "microservices ecommerce platform" intent as an independently shippable service; deferred behind the foundational User/Auth Service.
+  status: Built in `services/product-catalog-service` (branch `feat/product-catalog-service`). See root README for its API table and design-pattern notes.
+
+## Still deferred
 
 - source_spec: none
   summary: Cart Service — shopping cart state management demonstrating session/state-management patterns.
