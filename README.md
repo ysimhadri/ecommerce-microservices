@@ -176,3 +176,7 @@ above.
 rotation, and does not publish events to any message broker — none exists
 yet in this repo. `product-catalog-service` does not validate `auth-service`
 JWTs in v1 (see above) and does not publish/consume catalog-change events.
+
+## Landing assistant-built changes
+
+When the assistant builds on a machine that cannot push to GitHub, see [`docs/landing-changes-from-assistant.md`](docs/landing-changes-from-assistant.md).
