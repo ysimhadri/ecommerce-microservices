@@ -48,7 +48,12 @@ public class AuthService {
 
         User user = new User(email, passwordEncoder.encode(request.password()));
         try {
-            User saved = userRepository.save(user);
+            // saveAndFlush, not save: User.id is a client-assigned UUID with no generated-key
+            // dependency forcing an immediate INSERT, so Hibernate would otherwise defer the
+            // actual statement to transaction-commit time - after this method has already
+            // returned - letting a concurrent duplicate's constraint violation escape this
+            // catch block entirely (verified empirically; plain save() does not catch it).
+            User saved = userRepository.saveAndFlush(user);
             return toProfile(saved);
         } catch (DataIntegrityViolationException concurrentDuplicate) {
             // A concurrent request won the race between our existsByEmail check and this

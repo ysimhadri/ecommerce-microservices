@@ -54,13 +54,13 @@ class AuthServiceTest {
     void register_withNewEmail_persistsHashedPasswordAndReturnsProfileWithoutPasswordHash() {
         when(userRepository.existsByEmail(EMAIL)).thenReturn(false);
         when(passwordEncoder.encode(PASSWORD)).thenReturn("bcrypt-hash");
-        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(userRepository.saveAndFlush(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         UserProfileResponse profile = authService.register(new RegisterRequest(EMAIL, PASSWORD));
 
         assertThat(profile.email()).isEqualTo(EMAIL);
         assertThat(profile).extracting(Object::toString).asString().doesNotContain("bcrypt-hash");
-        verify(userRepository).save(any(User.class));
+        verify(userRepository).saveAndFlush(any(User.class));
     }
 
     @Test
@@ -70,14 +70,14 @@ class AuthServiceTest {
         assertThatThrownBy(() -> authService.register(new RegisterRequest(EMAIL, PASSWORD)))
                 .isInstanceOf(DuplicateEmailException.class);
 
-        verify(userRepository, never()).save(any(User.class));
+        verify(userRepository, never()).saveAndFlush(any(User.class));
     }
 
     @Test
     void register_normalizesEmailCaseAndWhitespace() {
         when(userRepository.existsByEmail("user@example.com")).thenReturn(false);
         when(passwordEncoder.encode(anyString())).thenReturn("hash");
-        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(userRepository.saveAndFlush(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         UserProfileResponse profile = authService.register(new RegisterRequest("  User@Example.com  ", PASSWORD));
 
