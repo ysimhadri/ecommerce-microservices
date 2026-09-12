@@ -237,6 +237,37 @@ class CatalogControllerIntegrationTest {
     }
 
     @Test
+    void createProduct_withTokenMissingWriteScope_returns403() {
+        // Direct AC coverage: the spec names /products explicitly ("Given a token has no
+        // catalog:write scope, when it's presented to POST /products..."), and only the
+        // /categories variant existed before this test.
+        UUID categoryId = createCategory(uniqueName("ScopeCheck"));
+
+        ResponseEntity<Map> response = postAuthed(
+                baseUrl() + "/products",
+                new ProductCreateRequest("Headphones", null, new BigDecimal("149.99"), categoryId),
+                Map.class, mintToken("catalog:read"));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(response.getBody().get("code")).isEqualTo("FORBIDDEN");
+    }
+
+    @Test
+    void createCategory_withTamperedSignature_returns401() {
+        // Distinct code path from "wrong audience": this fails at signature verification
+        // (SignatureException, a JwtException subtype) before the audience claim is even
+        // read, whereas the wrong-audience test uses a validly-signed token.
+        String validToken = writeToken();
+        String tamperedToken = validToken.substring(0, validToken.length() - 4) + "AAAA";
+
+        ResponseEntity<Map> response = postAuthed(
+                baseUrl() + "/categories", new CategoryCreateRequest(uniqueName("Tampered"), null),
+                Map.class, tamperedToken);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
+    @Test
     void createProduct_withUnknownCategory_returns400() {
         ResponseEntity<Map> response = postAuthed(
                 baseUrl() + "/products",

@@ -56,7 +56,7 @@ class ServiceRegistryServiceTest {
     void register_withNewName_persistsHashedSecretAndReturnsPlaintextOnce() {
         when(registeredServiceRepository.existsByName(NAME)).thenReturn(false);
         when(passwordEncoder.encode(anyString())).thenReturn("bcrypt-hash");
-        when(registeredServiceRepository.save(any(RegisteredService.class)))
+        when(registeredServiceRepository.saveAndFlush(any(RegisteredService.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
         ServiceCreatedResponse response = serviceRegistryService.register(
@@ -67,7 +67,7 @@ class ServiceRegistryServiceTest {
         assertThat(response.clientId()).startsWith(NAME + "-");
         // The response never carries the hash - only the freshly-generated plaintext.
         assertThat(response.clientSecret()).isNotEqualTo("bcrypt-hash");
-        verify(registeredServiceRepository).save(any(RegisteredService.class));
+        verify(registeredServiceRepository).saveAndFlush(any(RegisteredService.class));
     }
 
     @Test
@@ -78,7 +78,7 @@ class ServiceRegistryServiceTest {
                 new ServiceRegisterRequest(NAME, "Product Catalog", null, ServiceRole.PRODUCER)))
                 .isInstanceOf(DuplicateServiceNameException.class);
 
-        verify(registeredServiceRepository, never()).save(any(RegisteredService.class));
+        verify(registeredServiceRepository, never()).saveAndFlush(any(RegisteredService.class));
     }
 
     @Test

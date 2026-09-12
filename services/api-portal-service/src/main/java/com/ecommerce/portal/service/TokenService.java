@@ -19,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.LinkedHashSet;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Layered architecture, service tier: implements the OAuth2 client-credentials
@@ -78,9 +79,15 @@ public class TokenService {
                 .orElseThrow(() -> new GrantNotFoundException(consumer.getName(), producer.getName()));
 
         Set<String> grantedScopes = Scopes.asSet(grant.getScopes());
+        // Trim each requested scope before comparing - incidental whitespace (e.g. a
+        // client accidentally sending "catalog:write " or " catalog:write") must not
+        // fail to match an otherwise-identical granted scope.
         Set<String> requestedScopes = (request.scope() == null || request.scope().isEmpty())
                 ? grantedScopes
-                : new LinkedHashSet<>(request.scope());
+                : request.scope().stream()
+                        .map(String::trim)
+                        .filter(scope -> !scope.isEmpty())
+                        .collect(Collectors.toCollection(LinkedHashSet::new));
 
         Set<String> issuedScopes = new LinkedHashSet<>(grantedScopes);
         issuedScopes.retainAll(requestedScopes);

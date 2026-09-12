@@ -3,7 +3,11 @@ package com.ecommerce.portal.model;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
+import jakarta.persistence.PostLoad;
+import jakarta.persistence.PostPersist;
 import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
+import org.springframework.data.domain.Persistable;
 
 import java.time.Instant;
 import java.util.Objects;
@@ -16,14 +20,22 @@ import java.util.UUID;
  * space-delimited string, same rationale as {@link ProducerApi#getRequiredScopes()}.
  * A unique (consumer, producer) constraint at the DB level means exactly
  * one grant per pair - see the migration for why.
+ *
+ * <p>Implements {@link Persistable} for the same reason as {@code User}/
+ * {@code Category}/{@code RegisteredService}: a client-assigned UUID id
+ * defeats Spring Data JPA's default {@code isNew()} heuristic. See those
+ * entities' javadoc for the full explanation.</p>
  */
 @Entity
 @Table(name = "consumer_grants")
-public class ConsumerGrant {
+public class ConsumerGrant implements Persistable<UUID> {
 
     @Id
     @Column(nullable = false, updatable = false)
     private UUID id = UUID.randomUUID();
+
+    @Transient
+    private boolean isNew = true;
 
     @Column(name = "consumer_service_id", nullable = false)
     private UUID consumerServiceId;
@@ -48,8 +60,20 @@ public class ConsumerGrant {
         this.createdAt = Instant.now();
     }
 
+    @Override
     public UUID getId() {
         return id;
+    }
+
+    @Override
+    public boolean isNew() {
+        return isNew;
+    }
+
+    @PostLoad
+    @PostPersist
+    void markNotNew() {
+        this.isNew = false;
     }
 
     public UUID getConsumerServiceId() {

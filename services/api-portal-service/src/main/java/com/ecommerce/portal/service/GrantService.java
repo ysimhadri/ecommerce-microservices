@@ -9,6 +9,7 @@ import com.ecommerce.portal.model.ConsumerGrant;
 import com.ecommerce.portal.model.RegisteredService;
 import com.ecommerce.portal.repository.ConsumerGrantRepository;
 import com.ecommerce.portal.util.Scopes;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -51,7 +52,19 @@ public class GrantService {
         }
 
         ConsumerGrant grant = new ConsumerGrant(consumer.getId(), producer.getId(), Scopes.join(request.scopes()));
-        return toResponse(consumerGrantRepository.save(grant), consumer.getName(), producer.getName());
+        try {
+            // saveAndFlush, not save: ConsumerGrant.id is a client-assigned UUID - without
+            // this, a concurrent duplicate-grant race's constraint violation would defer
+            // past this method's return and never reach the catch below (see
+            // RegisteredService/Category/User's javadoc for the full explanation).
+            ConsumerGrant saved = consumerGrantRepository.saveAndFlush(grant);
+            return toResponse(saved, consumer.getName(), producer.getName());
+        } catch (DataIntegrityViolationException concurrentDuplicate) {
+            // A concurrent request won the race between our existsBy... check and this
+            // save() - the unique (consumer, producer) constraint caught it; report it
+            // the same way as the pre-check does.
+            throw new DuplicateGrantException(consumer.getName(), producer.getName());
+        }
     }
 
     @Transactional(readOnly = true)

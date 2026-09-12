@@ -57,7 +57,7 @@ class GrantServiceTest {
         when(serviceRegistryService.getEntity(producer.getId())).thenReturn(producer);
         when(consumerGrantRepository.existsByConsumerServiceIdAndProducerServiceId(consumer.getId(), producer.getId()))
                 .thenReturn(false);
-        when(consumerGrantRepository.save(any(ConsumerGrant.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(consumerGrantRepository.saveAndFlush(any(ConsumerGrant.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         GrantResponse response = grantService.createGrant(
                 new GrantCreateRequest(consumer.getId(), producer.getId(), List.of("catalog:write")));
@@ -76,7 +76,7 @@ class GrantServiceTest {
                 new GrantCreateRequest(producerOnly.getId(), java.util.UUID.randomUUID(), List.of("catalog:write"))))
                 .isInstanceOf(NotAConsumerException.class);
 
-        verify(consumerGrantRepository, never()).save(any(ConsumerGrant.class));
+        verify(consumerGrantRepository, never()).saveAndFlush(any(ConsumerGrant.class));
     }
 
     @Test
@@ -90,7 +90,7 @@ class GrantServiceTest {
                 new GrantCreateRequest(consumer.getId(), consumerOnlyAsProducer.getId(), List.of("catalog:write"))))
                 .isInstanceOf(NotAProducerException.class);
 
-        verify(consumerGrantRepository, never()).save(any(ConsumerGrant.class));
+        verify(consumerGrantRepository, never()).saveAndFlush(any(ConsumerGrant.class));
     }
 
     @Test
@@ -106,6 +106,6 @@ class GrantServiceTest {
                 new GrantCreateRequest(consumer.getId(), producer.getId(), List.of("catalog:write"))))
                 .isInstanceOf(DuplicateGrantException.class);
 
-        verify(consumerGrantRepository, never()).save(any(ConsumerGrant.class));
+        verify(consumerGrantRepository, never()).saveAndFlush(any(ConsumerGrant.class));
     }
 }

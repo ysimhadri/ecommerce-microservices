@@ -242,6 +242,31 @@ class PortalControllerIntegrationTest {
         assertThat(newSecretAttempt.getStatusCode()).isEqualTo(HttpStatus.OK);
     }
 
+    @Test
+    void listApis_onUnknownServiceId_returns404() {
+        ResponseEntity<Map> response = restTemplate.getForEntity(
+                baseUrl() + "/services/" + UUID.randomUUID() + "/apis", Map.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(response.getBody().get("code")).isEqualTo("SERVICE_NOT_FOUND");
+    }
+
+    @Test
+    void createGrant_forSamePairTwice_returns409OnTheSecondRealHttpCall() {
+        // Real HTTP + real DB, not a mock: GrantServiceTest's duplicate-grant case only
+        // ever stubs existsBy...=true, so it never exercises the actual save() path this
+        // test does on its second call.
+        ServiceCreatedResponse producer = registerService(uniqueName("dup-grant-producer"), ServiceRole.PRODUCER);
+        ServiceCreatedResponse consumer = registerService(uniqueName("dup-grant-consumer"), ServiceRole.CONSUMER);
+        GrantCreateRequest request = new GrantCreateRequest(consumer.id(), producer.id(), List.of("catalog:write"));
+        restTemplate.postForEntity(baseUrl() + "/grants", request, GrantResponse.class);
+
+        ResponseEntity<Map> response = restTemplate.postForEntity(baseUrl() + "/grants", request, Map.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(response.getBody().get("code")).isEqualTo("GRANT_ALREADY_EXISTS");
+    }
+
     // --- Listing ---------------------------------------------
 
     @Test

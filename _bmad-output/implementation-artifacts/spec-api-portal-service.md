@@ -2,7 +2,7 @@
 title: 'API Portal Service — Service-to-Service Client-Credentials Auth'
 type: 'feature'
 created: '2026-09-12'
-status: 'in-review'
+status: 'done'
 route: 'dispatch'
 review_loop_iteration: 0
 context: ['{project-root}/_bmad-output/implementation-artifacts/spec-product-catalog-service.md']
@@ -142,8 +142,44 @@ Code already exists on `origin/feat/api-portal-service`. This spec was authored 
 - **Expired-token rejection is unverified by any test**, in either service, though the code path (jjwt validates `exp` automatically) exists.
 - **No self-grant / self-audience guard** — a `BOTH`-role service can grant itself access to itself; not addressed anywhere in code or docs.
 - **Portal admin API's `rotate-secret` endpoint requires no auth and no ownership proof** — any caller who can reach the portal's admin surface can invalidate any registered service's credential and mint a fresh one for it. Consistent with the stated "v1 admin API is intentionally open" cut, but its blast radius (credential takeover) is broader than plain registration.
-- No test exercises any of the portal's own `400 VALIDATION_ERROR` paths, malformed-JSON handling, or the concurrent-duplicate-name race.
+- No test exercises any of the portal's own `400 VALIDATION_ERROR` paths, malformed-JSON handling.
+
+**Post-review patch round (2026-09-12):** all 7 `patch`-routed findings fixed directly (no live implementation agent for this externally-built branch):
+1. **High — `ServiceRegistryService.register`'s race guard was dead code.** `RegisteredService` now implements `Persistable<UUID>`; `register()` uses `saveAndFlush(...)`. 3rd occurrence of the identical bug found and fixed this session (`auth-service`, `product-catalog-service`, now here). Added `ConcurrentRegistrationTest` — empirically confirmed broken before (0 caught), fixed after (7/7 caught).
+2. **High — `GrantService.createGrant` had no race protection at all.** Added the missing `try/catch(DataIntegrityViolationException)` → `DuplicateGrantException`; `ConsumerGrant` now implements `Persistable<UUID>`; `createGrant` uses `saveAndFlush(...)`. Added `ConcurrentGrantCreationTest` — same empirical confirmation (0 → 7/7 caught).
+3. **Medium — non-UUID path/query values fell to 500.** Added `MethodArgumentTypeMismatchException` handler to the portal's `GlobalExceptionHandler`.
+4. **Medium — scope strings weren't trimmed.** `TokenService` now trims and filters blank entries from requested scopes before set-intersection.
+5. **Low — missing 404/409 integration coverage.** Added `listApis_onUnknownServiceId_returns404` and a real-HTTP duplicate-grant test to `PortalControllerIntegrationTest`.
+6. **Low — missing tampered-signature and missing-scope-on-`/products` tests.** Added both to `CatalogControllerIntegrationTest`.
+7. **Low — dead `.toLowerCase()`** in `ServiceRegistryService.register()` removed (bean validation already rejects uppercase input).
+
+Full suites after patches: `product-catalog-service` 30/30, `api-portal-service` 31/31.
 
 ## Spec Change Log
 
 ## Review Triage Log
+
+Reviewed 2026-09-12 via 4 layers (Blind Hunter, Edge Case Hunter, Verification Gap, Acceptance Auditor) against `feat/api-portal-service` merged onto the patched `main`.
+
+- **[high → patch]** `ServiceRegistryService.register`'s existing `try/catch(DataIntegrityViolationException)` is dead code — 3rd occurrence of the exact bug already found and fixed twice (`auth-service`, `product-catalog-service`): `RegisteredService.id` is a client-assigned UUID with no `@GeneratedValue`/`Persistable`, so `save()` defers its INSERT to commit time, after the catch has already returned. Verified by code inspection matching the identical, now-proven pattern. Fix: `RegisteredService implements Persistable<UUID>` + `saveAndFlush(...)`. (verification-gap)
+- **[high → patch]** `GrantService.createGrant` has **no** race protection at all — not even a (broken) try/catch — despite the V3 migration's own comment stating re-granting a duplicate pair "is rejected (409) rather than silently overwriting." `ConsumerGrant` has the same unprotected client-assigned-UUID shape. Fix: same `Persistable<UUID>` + `saveAndFlush(...)` + add the missing try/catch mapping to `DuplicateGrantException`. (verification-gap + acceptance-auditor + edge-case-hunter, one entry)
+- **[medium → patch]** No `MethodArgumentTypeMismatchException` handler in the portal's `GlobalExceptionHandler` — non-UUID path/query params on `GrantController`/`ServiceRegistryController` fall to the catch-all → 500 instead of 400. Same fix as catalog's identical finding. (edge-case-hunter)
+- **[medium → patch]** `TokenService` doesn't trim scope strings before set-intersection — incidental whitespace in a requested scope silently fails to match a granted scope, wrongly returning 403 `SCOPE_NOT_GRANTED` instead of matching. (edge-case-hunter)
+- **[low → patch]** No integration test covers declare-API on an unknown service id (should 404), and the duplicate-grant 409 path is only unit-tested against a mock, never through a real HTTP+DB round trip (unlike the analogous duplicate-service-name case, which is). (blind-hunter)
+- **[low → patch]** `CatalogControllerIntegrationTest` never asserts a tampered-signature token is rejected (only "no token," "wrong scope," "wrong audience") — a genuinely distinct code path (signature verification fails before audience is even checked). (blind-hunter)
+- **[low → patch]** AC2's literal scenario ("token missing `catalog:write` presented to `POST /products`") has no direct test — only the `/categories` variant exists. `SecurityConfig` applies the same check to both, so this is very likely already correct, but adding the mirror test is cheap and closes the literal AC. (acceptance-auditor)
+- **[low → patch]** Dead `.toLowerCase()` call in `ServiceRegistryService.register()` — `ServiceRegisterRequest.name`'s `@Pattern` already rejects any uppercase input via bean validation, so the call can never change anything and misleadingly suggests case-insensitive registration. Trivial removal, bundled with the Persistable fix to the same file. (blind-hunter)
+- **[false]** Declared producer APIs (`POST /services/{id}/apis`) are never enforced by `TokenService` — described as an undiscovered gap. Refuted: already documented verbatim in this spec's own Implementation Notes ("Declared APIs are never enforced... metadata only, not a real authorization input"). (blind-hunter + edge-case-hunter, one entry)
+- **[false]** No uniqueness constraint on `producer_apis`, allowing duplicate declarations. Refuted: already documented in this spec's Implementation Notes ("No uniqueness constraint on `producer_apis`... the same API can be declared multiple times"). (edge-case-hunter)
+- **[false]** AC1's cross-service interoperability (a token minted by a live `api-portal-service` accepted by a live `product-catalog-service`) isn't tested end-to-end. Refuted by the auditor's own admission: already documented verbatim in this spec's Implementation Notes as a pre-acknowledged, carried-forward limitation, not a new discovery. (acceptance-auditor)
+- **[false]** `PortalJwtService`'s `app.portal.jwt.secret` property was claimed to also control token expiry. Refuted: verified in code — `expiration-ms` and `secret` are separate constructor parameters/config keys; the class's own javadoc correctly describes both as independently config-driven. (edge-case-hunter)
+- **[low → rejected]** `PortalJwtValidator` never checks the `iss` claim. Real, but only `api-portal-service` ever holds the signing secret in this system — a token with a forged `iss` still can't be produced without that secret, so `aud`+signature already gate everything an `iss` check would add. Defense-in-depth for a future multi-issuer scenario that doesn't exist yet; rejected as low value now. (blind-hunter)
+- **[low → rejected]** `INVALID_CLIENT`'s "no enumeration" guarantee has a narrow bypass: the role check fires only after a correct secret match, so a correct-secret-wrong-role request gets a distinguishable 403 instead of 401. Real, but only reachable by someone who already has the correct 256-bit-entropy secret — the oracle can't help find it, since you need it to reach the branch that exposes the oracle. Rejected as low-impact given the secret's entropy makes any guessing attack infeasible regardless. (acceptance-auditor)
+- **[low → rejected]** Self-grant (`consumerServiceId == producerServiceId` on a `BOTH`-role service) isn't prevented. Not clearly harmful either way (no incorrect behavior results, just an unusual grant), and the fix adds a new guard/exception — rejected per the low+guard-fix rule rather than escalated as a full decision-needed checkpoint for something this minor. (edge-case-hunter)
+- **[low → rejected]** `DataIntegrityViolationException` in `ServiceRegistryService.register` is assumed to always be the `name` constraint; a `client_id` collision would be misreported. `client_id` includes 96 bits of random suffix — collision is not practically reachable. Rejected. (edge-case-hunter)
+- **[low → rejected]** No pagination on `GET /services`/`GET /grants`, inconsistent with catalog's paginated product listing. Real inconsistency, low severity at this project's expected scale (dozens of registered services, not thousands); fix is more than trivial (new query params + response shape). Rejected. (blind-hunter)
+- **[low → rejected]** N+1 queries in `GrantService` resolving consumer/producer display names per grant instead of batched. Real, but a performance nitpick at demo scale, not a correctness bug; fix is more than a direct correction. Rejected. (blind-hunter)
+- **[low → rejected]** No dedicated unit test for the `Scopes` utility. Already exercised indirectly via `TokenServiceTest`/`GrantServiceTest`; low incremental value. Rejected. (blind-hunter)
+- **[low → rejected]** `TokenRequest.scope` accepts a JSON array rather than the RFC 6749 space-delimited string used internally. Not a defect — a JSON REST API accepting an idiomatic array input while producing an RFC-compliant claim internally is a defensible design choice, not a violation. Rejected as false-premise/non-issue. (blind-hunter)
+- **[low → rejected]** `TokenRequest.scope` list entries have no per-element `@NotBlank`, unlike `GrantCreateRequest.scopes`. Real minor DTO inconsistency; low impact, fix adds a validation guard. Rejected per the low+guard-fix rule. (acceptance-auditor)
+- **[defer]** JWT secret rotation has no `kid`/dual-key support for a graceful rotation window — a real operational gap, but an architectural enhancement beyond a patch-sized fix. (blind-hunter)

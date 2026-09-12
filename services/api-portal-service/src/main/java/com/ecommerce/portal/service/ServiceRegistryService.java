@@ -51,7 +51,9 @@ public class ServiceRegistryService {
 
     @Transactional
     public ServiceCreatedResponse register(ServiceRegisterRequest request) {
-        String name = request.name().trim().toLowerCase();
+        // No .toLowerCase() here: ServiceRegisterRequest.name's @Pattern already rejects
+        // any uppercase input at the bean-validation layer before this method ever runs.
+        String name = request.name().trim();
 
         if (registeredServiceRepository.existsByName(name)) {
             throw new DuplicateServiceNameException(name);
@@ -65,7 +67,10 @@ public class ServiceRegistryService {
                 clientId, passwordEncoder.encode(clientSecret));
 
         try {
-            RegisteredService saved = registeredServiceRepository.save(service);
+            // saveAndFlush, not save: see RegisteredService's javadoc - a client-assigned
+            // UUID id needs the explicit flush to make the INSERT (and any constraint
+            // violation) happen synchronously, inside this catch.
+            RegisteredService saved = registeredServiceRepository.saveAndFlush(service);
             return new ServiceCreatedResponse(
                     saved.getId(), saved.getName(), saved.getDisplayName(), saved.getBaseUrl(), saved.getRole(),
                     saved.getClientId(), clientSecret, saved.isActive(), saved.getCreatedAt());

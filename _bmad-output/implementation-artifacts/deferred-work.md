@@ -42,3 +42,9 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-product-catalog-service.md`
   summary: No CI configuration exists for product-catalog-service (or any service in this repo).
   evidence: Pre-existing gap across the whole repo, not introduced by this PR — auth-service has no CI config either. Noted during review, not actionable as a fix to this one PR.
+
+## Deferred from: code review of spec-api-portal-service (2026-09-12)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-api-portal-service.md`
+  summary: JWT secret rotation has no kid/dual-key support for a graceful rotation window.
+  evidence: PORTAL_JWT_SECRET must be updated identically and simultaneously across api-portal-service and every producer service today; a real operational gap, but adding key-id-based dual-key support is an architectural enhancement beyond a patch-sized fix.
