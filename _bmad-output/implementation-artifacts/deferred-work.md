@@ -2,9 +2,10 @@
 
 ## Done
 
-- summary: Product Catalog Service — product listings, search, and categories demonstrating a CQRS/read-optimized store with caching.
-  evidence: Split from the original "microservices ecommerce platform" intent as an independently shippable service; deferred behind the foundational User/Auth Service.
-  status: Built in `services/product-catalog-service` (branch `feat/product-catalog-service`). See root README for its API table and design-pattern notes.
+- source_spec: `_bmad-output/implementation-artifacts/spec-product-catalog-service.md`
+  summary: Product Catalog Service — product listings, search, and categories demonstrating a CQRS/read-optimized store with caching.
+  evidence: Originally split from the "microservices ecommerce platform" intent as an independently shippable service, deferred behind the foundational User/Auth Service; now built and reviewed.
+  status: Built in `services/product-catalog-service`, merged to `main`. See root README for its API table and design-pattern notes.
 
 - summary: API Portal (service-to-service auth) — client-credentials HS256 JWT issuance so microservices can call each other's protected endpoints, plus write-protection for Product Catalog's write endpoints.
   evidence: Product Catalog's writes were open (v1 scope cut, see its README section's history); once a second internal caller needed to write to it, some form of S2S auth became necessary. `auth-service` was explicitly kept human-user-only rather than overloaded into a second responsibility.
@@ -35,3 +36,9 @@
 - source_spec: none
   summary: API Gateway — single entry point demonstrating the gateway/BFF pattern with routing and aggregation.
   evidence: Split from the original "microservices ecommerce platform" intent as an independently shippable service; deferred behind the foundational User/Auth Service. NOTE — api-portal-service (above, done) is not this: it issues/validates S2S tokens but does not route, aggregate, or front external traffic. This item is still open.
+
+## Deferred from: code review of spec-product-catalog-service (2026-09-12)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-product-catalog-service.md`
+  summary: No CI configuration exists for product-catalog-service (or any service in this repo).
+  evidence: Pre-existing gap across the whole repo, not introduced by this PR — auth-service has no CI config either. Noted during review, not actionable as a fix to this one PR.

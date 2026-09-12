@@ -43,13 +43,13 @@ class CategoryServiceTest {
     @Test
     void create_withNewName_persistsAndReturnsCategory() {
         when(categoryRepository.existsByNameIgnoreCase(NAME)).thenReturn(false);
-        when(categoryRepository.save(any(Category.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(categoryRepository.saveAndFlush(any(Category.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         CategoryResponse response = categoryCommandService.create(new CategoryCreateRequest(NAME, "Gadgets and devices"));
 
         assertThat(response.name()).isEqualTo(NAME);
         assertThat(response.description()).isEqualTo("Gadgets and devices");
-        verify(categoryRepository).save(any(Category.class));
+        verify(categoryRepository).saveAndFlush(any(Category.class));
     }
 
     @Test
@@ -59,13 +59,13 @@ class CategoryServiceTest {
         assertThatThrownBy(() -> categoryCommandService.create(new CategoryCreateRequest(NAME, null)))
                 .isInstanceOf(DuplicateCategoryNameException.class);
 
-        verify(categoryRepository, never()).save(any(Category.class));
+        verify(categoryRepository, never()).saveAndFlush(any(Category.class));
     }
 
     @Test
     void create_trimsName() {
         when(categoryRepository.existsByNameIgnoreCase(NAME)).thenReturn(false);
-        when(categoryRepository.save(any(Category.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(categoryRepository.saveAndFlush(any(Category.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         CategoryResponse response = categoryCommandService.create(new CategoryCreateRequest("  " + NAME + "  ", null));
 
