@@ -6,6 +6,10 @@
   evidence: Split from the original "microservices ecommerce platform" intent as an independently shippable service; deferred behind the foundational User/Auth Service.
   status: Built in `services/product-catalog-service` (branch `feat/product-catalog-service`). See root README for its API table and design-pattern notes.
 
+- summary: API Portal (service-to-service auth) — client-credentials HS256 JWT issuance so microservices can call each other's protected endpoints, plus write-protection for Product Catalog's write endpoints.
+  evidence: Product Catalog's writes were open (v1 scope cut, see its README section's history); once a second internal caller needed to write to it, some form of S2S auth became necessary. `auth-service` was explicitly kept human-user-only rather than overloaded into a second responsibility.
+  status: Built in `services/api-portal-service` (branch `feat/api-portal-service`) — service registration, producer API declaration, consumer grants (auto-approved, no human workflow), and the `/oauth/token` client-credentials endpoint. `product-catalog-service`'s `POST /categories` and `POST /products` now require a valid token with the `catalog:write` scope; its `GET` endpoints remain public. See root README's `api-portal-service` section and "Service-to-service (S2S) auth flow" for the full picture, including why this is deliberately *not* the API Gateway below.
+
 ## Still deferred
 
 - source_spec: none
@@ -30,4 +34,4 @@
 
 - source_spec: none
   summary: API Gateway — single entry point demonstrating the gateway/BFF pattern with routing and aggregation.
-  evidence: Split from the original "microservices ecommerce platform" intent as an independently shippable service; deferred behind the foundational User/Auth Service.
+  evidence: Split from the original "microservices ecommerce platform" intent as an independently shippable service; deferred behind the foundational User/Auth Service. NOTE — api-portal-service (above, done) is not this: it issues/validates S2S tokens but does not route, aggregate, or front external traffic. This item is still open.

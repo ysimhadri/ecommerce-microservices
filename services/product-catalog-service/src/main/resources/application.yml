@@ -28,6 +28,20 @@ spring:
       # CacheConfig) - no extra infrastructure to run for a v1 service.
       spec: maximumSize=500,expireAfterWrite=5m
 
+app:
+  portal:
+    jwt:
+      # Must be the exact same value as api-portal-service's PORTAL_JWT_SECRET -
+      # this service only *validates* S2S tokens (see PortalJwtValidator), it
+      # never talks to api-portal-service over the network to do so. The
+      # default below matches api-portal-service's dev-only default so
+      # `docker compose up` works out of the box; override both together.
+      secret: ${PORTAL_JWT_SECRET:dev-only-change-me-api-portal-service-hs256-signing-secret-32bytes+}
+      # This service's own registered name in api-portal-service - the
+      # audience a token must carry to be accepted here. Must match the
+      # `name` this service was registered under via POST /api/v1/portal/services.
+      audience: ${PORTAL_JWT_AUDIENCE:product-catalog-service}
+
 logging:
   level:
     com.ecommerce.catalog: INFO
