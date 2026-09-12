@@ -20,19 +20,22 @@ public interface ProductRepository extends JpaRepository<Product, UUID> {
 
     Page<Product> findByCategoryId(UUID categoryId, Pageable pageable);
 
+    // ESCAPE '\' pairs with ProductQueryService.escapeLikeWildcards, which backslash-escapes
+    // any literal %, _, or \ in the caller's search term before it reaches here - otherwise
+    // those characters are silently treated as ILIKE wildcards instead of literal text.
     @Query(
-            value = "SELECT * FROM products WHERE name ILIKE CONCAT('%', :term, '%') "
-                    + "OR description ILIKE CONCAT('%', :term, '%')",
-            countQuery = "SELECT count(*) FROM products WHERE name ILIKE CONCAT('%', :term, '%') "
-                    + "OR description ILIKE CONCAT('%', :term, '%')",
+            value = "SELECT * FROM products WHERE name ILIKE CONCAT('%', :term, '%') ESCAPE '\\' "
+                    + "OR description ILIKE CONCAT('%', :term, '%') ESCAPE '\\'",
+            countQuery = "SELECT count(*) FROM products WHERE name ILIKE CONCAT('%', :term, '%') ESCAPE '\\' "
+                    + "OR description ILIKE CONCAT('%', :term, '%') ESCAPE '\\'",
             nativeQuery = true)
     Page<Product> searchByTerm(@Param("term") String term, Pageable pageable);
 
     @Query(
             value = "SELECT * FROM products WHERE category_id = :categoryId AND "
-                    + "(name ILIKE CONCAT('%', :term, '%') OR description ILIKE CONCAT('%', :term, '%'))",
+                    + "(name ILIKE CONCAT('%', :term, '%') ESCAPE '\\' OR description ILIKE CONCAT('%', :term, '%') ESCAPE '\\')",
             countQuery = "SELECT count(*) FROM products WHERE category_id = :categoryId AND "
-                    + "(name ILIKE CONCAT('%', :term, '%') OR description ILIKE CONCAT('%', :term, '%'))",
+                    + "(name ILIKE CONCAT('%', :term, '%') ESCAPE '\\' OR description ILIKE CONCAT('%', :term, '%') ESCAPE '\\')",
             nativeQuery = true)
     Page<Product> searchByCategoryIdAndTerm(@Param("categoryId") UUID categoryId,
                                              @Param("term") String term,

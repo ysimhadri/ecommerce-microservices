@@ -14,11 +14,13 @@ import org.springframework.boot.testcontainers.service.connection.ServiceConnect
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.client.HttpComponentsClientHttpRequestFactory;
+import org.springframework.web.util.UriComponentsBuilder;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.math.BigDecimal;
+import java.net.URI;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -212,5 +214,60 @@ class CatalogControllerIntegrationTest {
         List<Map<String, Object>> content = (List<Map<String, Object>>) response.getBody().get("content");
         assertThat(content).hasSize(1);
         assertThat(content.get(0).get("name")).isEqualTo(uniqueToken);
+    }
+
+    @Test
+    void searchProducts_byCategoryAndTerm_returnsOnlyProductsMatchingBothFilters() {
+        // Real Postgres, not a mock: proves ProductRepository.searchByCategoryIdAndTerm's
+        // native SQL actually runs correctly - a mocked unit test can't catch a broken
+        // AND/OR or a binding mismatch in the query text itself.
+        UUID categoryAId = createCategory(uniqueName("CombinedA"));
+        UUID categoryBId = createCategory(uniqueName("CombinedB"));
+        String uniqueToken = "Widgetron" + UUID.randomUUID().toString().substring(0, 8);
+
+        // Matches both filters - should be returned.
+        restTemplate.postForEntity(baseUrl() + "/products",
+                new ProductCreateRequest(uniqueToken, null, BigDecimal.TEN, categoryAId), ProductResponse.class);
+        // Matches the term but the wrong category - must be excluded.
+        restTemplate.postForEntity(baseUrl() + "/products",
+                new ProductCreateRequest(uniqueToken, null, BigDecimal.TEN, categoryBId), ProductResponse.class);
+        // Matches the category but not the term - must be excluded.
+        restTemplate.postForEntity(baseUrl() + "/products",
+                new ProductCreateRequest("Unrelated Gadget", null, BigDecimal.TEN, categoryAId), ProductResponse.class);
+
+        ResponseEntity<Map> response = restTemplate.getForEntity(
+                baseUrl() + "/products?categoryId=" + categoryAId + "&q=" + uniqueToken, Map.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        List<Map<String, Object>> content = (List<Map<String, Object>>) response.getBody().get("content");
+        assertThat(content).hasSize(1);
+        assertThat(content.get(0).get("name")).isEqualTo(uniqueToken);
+    }
+
+    @Test
+    void searchProducts_byTermContainingLikeWildcards_treatsThemAsLiteralCharacters() {
+        UUID categoryId = createCategory(uniqueName("Wildcard"));
+        String literalToken = "100%_off-" + UUID.randomUUID().toString().substring(0, 8);
+        restTemplate.postForEntity(baseUrl() + "/products",
+                new ProductCreateRequest(literalToken, null, BigDecimal.TEN, categoryId), ProductResponse.class);
+        // Would also match "100%_off..." under an unescaped ILIKE '%100X_off%' pattern
+        // (any single character for '_', anything for '%') - must NOT be returned once
+        // '%' and '_' are escaped to their literal meaning.
+        restTemplate.postForEntity(baseUrl() + "/products",
+                new ProductCreateRequest("100Xoff-decoy", null, BigDecimal.TEN, categoryId), ProductResponse.class);
+
+        // literalToken contains a raw '%' - build the URI properly rather than string-
+        // concatenating it into the URL, since '%' is a reserved URI escape character.
+        URI uri = UriComponentsBuilder.fromUriString(baseUrl() + "/products")
+                .queryParam("q", literalToken)
+                .build()
+                .encode()
+                .toUri();
+        ResponseEntity<Map> response = restTemplate.getForEntity(uri, Map.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        List<Map<String, Object>> content = (List<Map<String, Object>>) response.getBody().get("content");
+        assertThat(content).hasSize(1);
+        assertThat(content.get(0).get("name")).isEqualTo(literalToken);
     }
 }

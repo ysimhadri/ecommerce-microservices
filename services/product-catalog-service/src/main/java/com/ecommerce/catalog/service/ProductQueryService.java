@@ -49,7 +49,7 @@ public class ProductQueryService {
 
     @Transactional(readOnly = true)
     public PageResponse<ProductResponse> list(UUID categoryId, String searchTerm, Pageable pageable) {
-        String term = (searchTerm == null || searchTerm.isBlank()) ? null : searchTerm.trim();
+        String term = (searchTerm == null || searchTerm.isBlank()) ? null : escapeLikeWildcards(searchTerm.trim());
 
         Page<Product> page;
         if (term != null && categoryId != null) {
@@ -71,6 +71,13 @@ public class ProductQueryService {
 
         Function<Product, ProductResponse> mapper = p -> toResponse(p, categoryNamesById.get(p.getCategoryId()));
         return PageResponse.from(page, mapper);
+    }
+
+    // ProductRepository's search queries build ILIKE CONCAT('%', :term, '%') patterns and
+    // pair this with an ESCAPE '\' clause, so a literal % or _ typed by the caller is
+    // matched literally instead of being treated as a wildcard.
+    private String escapeLikeWildcards(String term) {
+        return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
     }
 
     private ProductResponse toResponse(Product product, String categoryName) {
