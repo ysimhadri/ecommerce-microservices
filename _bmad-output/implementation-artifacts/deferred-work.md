@@ -27,3 +27,9 @@
 - source_spec: none
   summary: API Gateway — single entry point demonstrating the gateway/BFF pattern with routing and aggregation.
   evidence: Split from the original "microservices ecommerce platform" intent as an independently shippable service; deferred behind the foundational User/Auth Service.
+
+## Deferred from: code review of spec-product-catalog-service (2026-09-12)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-product-catalog-service.md`
+  summary: No CI configuration exists for product-catalog-service (or any service in this repo).
+  evidence: Pre-existing gap across the whole repo, not introduced by this PR — auth-service has no CI config either. Noted during review, not actionable as a fix to this one PR.
