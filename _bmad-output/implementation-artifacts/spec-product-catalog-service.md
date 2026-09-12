@@ -2,7 +2,7 @@
 title: 'Product Catalog Service — Categories, Products, Search (CQRS-lite + Caching)'
 type: 'feature'
 created: '2026-09-12'
-status: 'in-review'
+status: 'done'
 route: 'dispatch'
 review_loop_iteration: 0
 context: []
@@ -117,11 +117,19 @@ Deliberately **not** present (consistent with "no auth in v1"): no Strategy (`Pa
 ## Implementation Notes
 
 Code already exists on `origin/feat/product-catalog-service`. This spec was authored retroactively (2026-09-12) from a full-code investigation (not just the diff) to anchor a structured review before merge. Known gaps surfaced during investigation — carried to review rather than fixed here:
-- Non-UUID path/query values (`GET /products/{id}`, `categoryId` filter, `page`/`size`) fall through to the generic `500` handler instead of `400` — no `MethodArgumentTypeMismatchException` handler exists.
-- The case-insensitive duplicate-name race guard relies on a case-*sensitive* DB unique constraint, so two concurrent creates differing only in case can both succeed.
-- `POST /products` with an unknown `categoryId` returns 400, but `GET /products?categoryId=<unknown>` silently returns an empty page — asymmetric, not stated as intentional anywhere in code or docs.
-- No upper bound on caller-supplied page `size`.
-- Malformed JSON body, oversized-but-valid-type inputs (name at/over length limits), and the concurrent-duplicate race path have no covering test.
+- `POST /products` with an unknown `categoryId` returns 400, but `GET /products?categoryId=<unknown>` silently returns an empty page — asymmetric, not stated as intentional anywhere in code or docs (not raised by review; left as-is).
+- No upper bound on caller-supplied page `size`, `q` length, or `price` precision, and no update/delete endpoints exist — all reviewed and accepted as low-severity/intentional (see Review Triage Log).
+
+**Post-review patch round (2026-09-12):** all 7 `patch`-routed findings from the 4-layer review fixed directly (no live implementation agent for this externally-built branch):
+1. **High — concurrent-duplicate race escaping 409.** `Category` now implements `Persistable<UUID>`; `CategoryCommandService.create` uses `saveAndFlush(...)` instead of `save(...)` — identical fix to the one applied to `auth-service`'s `User`/`AuthService` the same day, for the same underlying JPA behavior (client-assigned UUID ids default to `merge()` with a deferred flush). Added `ConcurrentCategoryCreationTest` (8-thread race, real Postgres) as a permanent regression test; empirically confirmed broken before the fix (0/7 caught), fixed after (7/7 caught).
+2. **Case-insensitive uniqueness vs. case-sensitive DB constraint.** Added `V3__case_insensitive_category_name_uniqueness.sql` — a functional unique index on `lower(name)`.
+3. **Type-mismatch inputs falling to 500.** Added `@ExceptionHandler(MethodArgumentTypeMismatchException.class)` to `GlobalExceptionHandler` → 400 `VALIDATION_ERROR`.
+4. **Unescaped LIKE wildcards in search.** `ProductQueryService` now escapes `%`, `_`, and `\` in the search term before it reaches `ProductRepository`'s native queries, which now pair `ILIKE` with `ESCAPE '\'`. Added a test proving a literal `%`/`_` in a search term is matched literally, not as a wildcard.
+5. **Combined `categoryId`+`q` filter untested against a real DB.** Added `searchProducts_byCategoryAndTerm_returnsOnlyProductsMatchingBothFilters` to the Testcontainers integration suite.
+6. **`deferred-work.md` schema drift.** Restored the `source_spec` field on the "Done" entry and refreshed its stale evidence text.
+7. **Scope creep.** Removed `docs/landing-changes-from-assistant.md` from this branch (PR-mechanics documentation, unrelated to the catalog feature).
+
+Full suite after patches: 24/24 pass (`cd services/product-catalog-service && mvn test`).
 
 ## Spec Change Log
 

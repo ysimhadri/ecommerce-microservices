@@ -1,8 +1,13 @@
 # Deferred Work
 
-- source_spec: none
+## Done
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-product-catalog-service.md`
   summary: Product Catalog Service — product listings, search, and categories demonstrating a CQRS/read-optimized store with caching.
-  evidence: Split from the original "microservices ecommerce platform" intent as an independently shippable service; deferred behind the foundational User/Auth Service.
+  evidence: Originally split from the "microservices ecommerce platform" intent as an independently shippable service, deferred behind the foundational User/Auth Service; now built and reviewed.
+  status: Built in `services/product-catalog-service`, merged to `main`. See root README for its API table and design-pattern notes.
+
+## Still deferred
 
 - source_spec: none
   summary: Cart Service — shopping cart state management demonstrating session/state-management patterns.

@@ -48,8 +48,54 @@ services:
     networks:
       - ecommerce-net
 
+  catalog-postgres:
+    image: postgres:16-alpine
+    container_name: catalog-postgres
+    environment:
+      POSTGRES_DB: ${CATALOG_DB_NAME:-catalogdb}
+      POSTGRES_USER: ${CATALOG_DB_USERNAME:-cataloguser}
+      POSTGRES_PASSWORD: ${CATALOG_DB_PASSWORD:-catalogpass}
+    volumes:
+      - catalog_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${CATALOG_DB_USERNAME:-cataloguser} -d ${CATALOG_DB_NAME:-catalogdb}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - ecommerce-net
+
+  product-catalog-service:
+    build:
+      context: ./services/product-catalog-service
+    container_name: product-catalog-service
+    environment:
+      DB_HOST: catalog-postgres
+      DB_PORT: 5432
+      DB_NAME: ${CATALOG_DB_NAME:-catalogdb}
+      DB_USERNAME: ${CATALOG_DB_USERNAME:-cataloguser}
+      DB_PASSWORD: ${CATALOG_DB_PASSWORD:-catalogpass}
+    ports:
+      - "8081:8080"
+    depends_on:
+      catalog-postgres:
+        condition: service_healthy
+    healthcheck:
+      # No actuator dependency in this service, so just confirm the HTTP
+      # port is accepting and answering requests (any response proves
+      # Spring Boot is up; wget's exit code 4 means "could not connect" and
+      # is the only failure case here).
+      test: ["CMD-SHELL", "wget -qO- -T 3 http://localhost:8080/api/v1/catalog/categories >/dev/null 2>&1; test $? -ne 4"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - ecommerce-net
+
 volumes:
   postgres_data:
+  catalog_postgres_data:
 
 networks:
   ecommerce-net:
