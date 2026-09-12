@@ -1,0 +1,38 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: api-portal-service
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:portaldb}
+    username: ${DB_USERNAME:portaluser}
+    password: ${DB_PASSWORD:portalpass}
+  jpa:
+    open-in-view: false
+    hibernate:
+      # Schema comes solely from Flyway migrations; JPA only validates the
+      # entity mapping against it at startup - it never generates DDL.
+      ddl-auto: validate
+    properties:
+      hibernate:
+        format_sql: true
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+app:
+  portal:
+    jwt:
+      # Shared secret for HS256 service-to-service tokens. Any producer
+      # service that wants to validate tokens minted here (e.g.
+      # product-catalog-service) must be configured with this exact value -
+      # see PORTAL_JWT_SECRET in that service's application.yml.
+      # This default is dev-only and long enough (>= 32 bytes) to satisfy
+      # HS256's minimum key length.
+      secret: ${PORTAL_JWT_SECRET:dev-only-change-me-api-portal-service-hs256-signing-secret-32bytes+}
+      expiration-ms: ${PORTAL_JWT_EXPIRATION_MS:900000} # 15 minutes - short-lived S2S access token
+
+logging:
+  level:
+    com.ecommerce.portal: INFO
