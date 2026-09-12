@@ -4,13 +4,19 @@ import com.ecommerce.catalog.dto.CategoryCreateRequest;
 import com.ecommerce.catalog.dto.CategoryResponse;
 import com.ecommerce.catalog.dto.ProductCreateRequest;
 import com.ecommerce.catalog.dto.ProductResponse;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.security.Keys;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.client.HttpComponentsClientHttpRequestFactory;
@@ -19,8 +25,12 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import javax.crypto.SecretKey;
 import java.math.BigDecimal;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -31,6 +41,13 @@ import static org.assertj.core.api.Assertions.assertThat;
  * Testcontainers-backed integration test exercising the real HTTP endpoints
  * end-to-end against a real PostgreSQL instance (Flyway migrations,
  * including the pg_trgm search indexes, run for real).
+ *
+ * <p>Write endpoints now require a service-to-service JWT with the
+ * {@code catalog:write} scope and an audience matching this service (see
+ * SecurityConfig/PortalJwtValidator) - {@link #mintToken} mints one
+ * directly with jjwt using this service's own configured secret/audience,
+ * the same duplication PortalJwtValidator itself documents, rather than
+ * standing up a real api-portal-service for this test.
  */
 @Testcontainers
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
@@ -46,11 +63,18 @@ class CatalogControllerIntegrationTest {
     @Autowired
     private TestRestTemplate restTemplate;
 
+    @Value("${app.portal.jwt.secret}")
+    private String portalJwtSecret;
+
+    @Value("${app.portal.jwt.audience}")
+    private String portalJwtAudience;
+
     /**
      * See auth-service's equivalent test for why: the JDK's default
      * HttpURLConnection-backed request factory can mishandle retrying a
      * request body after certain error responses - Apache HttpClient does
-     * not have this issue.
+     * not have this issue. Several tests here deliberately provoke a
+     * 401/403 on the write endpoints.
      */
     @BeforeEach
     void useApacheHttpClientRequestFactory() {
@@ -65,18 +89,46 @@ class CatalogControllerIntegrationTest {
         return prefix + "-" + UUID.randomUUID();
     }
 
+    /** A valid S2S token for this service, carrying whichever scopes the test needs (usually just catalog:write). */
+    private String mintToken(String... scopes) {
+        SecretKey signingKey = Keys.hmacShaKeyFor(portalJwtSecret.getBytes(StandardCharsets.UTF_8));
+        Instant now = Instant.now();
+        return Jwts.builder()
+                .issuer("api-portal")
+                .subject("test-consumer-service")
+                .audience().add(portalJwtAudience).and()
+                .claim("scope", String.join(" ", scopes))
+                .issuedAt(Date.from(now))
+                .expiration(Date.from(now.plusSeconds(900)))
+                .signWith(signingKey, Jwts.SIG.HS256)
+                .compact();
+    }
+
+    private String writeToken() {
+        return mintToken("catalog:write");
+    }
+
+    private <T> ResponseEntity<T> postAuthed(String url, Object body, Class<T> responseType, String bearerToken) {
+        HttpHeaders headers = new HttpHeaders();
+        if (bearerToken != null) {
+            headers.setBearerAuth(bearerToken);
+        }
+        return restTemplate.exchange(url, HttpMethod.POST, new HttpEntity<>(body, headers), responseType);
+    }
+
     private UUID createCategory(String name) {
-        ResponseEntity<CategoryResponse> response = restTemplate.postForEntity(
-                baseUrl() + "/categories", new CategoryCreateRequest(name, "test category"), CategoryResponse.class);
+        ResponseEntity<CategoryResponse> response = postAuthed(
+                baseUrl() + "/categories", new CategoryCreateRequest(name, "test category"), CategoryResponse.class, writeToken());
         return response.getBody().id();
     }
 
     // --- Category create ---------------------------------------------
 
     @Test
-    void createCategory_withNewName_returns201() {
-        ResponseEntity<CategoryResponse> response = restTemplate.postForEntity(
-                baseUrl() + "/categories", new CategoryCreateRequest(uniqueName("Electronics"), "Gadgets"), CategoryResponse.class);
+    void createCategory_withValidWriteToken_returns201() {
+        ResponseEntity<CategoryResponse> response = postAuthed(
+                baseUrl() + "/categories", new CategoryCreateRequest(uniqueName("Electronics"), "Gadgets"),
+                CategoryResponse.class, writeToken());
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
         assertThat(response.getBody()).isNotNull();
@@ -84,12 +136,52 @@ class CatalogControllerIntegrationTest {
     }
 
     @Test
+    void createCategory_withoutToken_returns401() {
+        ResponseEntity<Map> response = postAuthed(
+                baseUrl() + "/categories", new CategoryCreateRequest(uniqueName("NoToken"), null), Map.class, null);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(response.getBody().get("code")).isEqualTo("UNAUTHORIZED");
+    }
+
+    @Test
+    void createCategory_withTokenMissingWriteScope_returns403() {
+        ResponseEntity<Map> response = postAuthed(
+                baseUrl() + "/categories", new CategoryCreateRequest(uniqueName("WrongScope"), null),
+                Map.class, mintToken("catalog:read"));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(response.getBody().get("code")).isEqualTo("FORBIDDEN");
+    }
+
+    @Test
+    void createCategory_withTokenForWrongAudience_returns401() {
+        SecretKey signingKey = Keys.hmacShaKeyFor(portalJwtSecret.getBytes(StandardCharsets.UTF_8));
+        Instant now = Instant.now();
+        String wrongAudienceToken = Jwts.builder()
+                .issuer("api-portal")
+                .subject("test-consumer-service")
+                .audience().add("some-other-service").and()
+                .claim("scope", "catalog:write")
+                .issuedAt(Date.from(now))
+                .expiration(Date.from(now.plusSeconds(900)))
+                .signWith(signingKey, Jwts.SIG.HS256)
+                .compact();
+
+        ResponseEntity<Map> response = postAuthed(
+                baseUrl() + "/categories", new CategoryCreateRequest(uniqueName("WrongAudience"), null),
+                Map.class, wrongAudienceToken);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
+    @Test
     void createCategory_withDuplicateName_returns409() {
         String name = uniqueName("Books");
-        restTemplate.postForEntity(baseUrl() + "/categories", new CategoryCreateRequest(name, null), CategoryResponse.class);
+        postAuthed(baseUrl() + "/categories", new CategoryCreateRequest(name, null), CategoryResponse.class, writeToken());
 
-        ResponseEntity<Map> response = restTemplate.postForEntity(
-                baseUrl() + "/categories", new CategoryCreateRequest(name, null), Map.class);
+        ResponseEntity<Map> response = postAuthed(
+                baseUrl() + "/categories", new CategoryCreateRequest(name, null), Map.class, writeToken());
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
         assertThat(response.getBody().get("code")).isEqualTo("CATEGORY_ALREADY_EXISTS");
@@ -97,14 +189,14 @@ class CatalogControllerIntegrationTest {
 
     @Test
     void createCategory_withBlankName_returns400WithValidationError() {
-        ResponseEntity<Map> response = restTemplate.postForEntity(
-                baseUrl() + "/categories", new CategoryCreateRequest("", null), Map.class);
+        ResponseEntity<Map> response = postAuthed(
+                baseUrl() + "/categories", new CategoryCreateRequest("", null), Map.class, writeToken());
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
         assertThat(response.getBody().get("code")).isEqualTo("VALIDATION_ERROR");
     }
 
-    // --- Category list ---------------------------------------------
+    // --- Category list (public, no token needed) ---------------------------------------------
 
     @Test
     void listCategories_includesEveryCreatedCategory() {
@@ -124,10 +216,10 @@ class CatalogControllerIntegrationTest {
         String categoryName = uniqueName("Audio");
         UUID categoryId = createCategory(categoryName);
 
-        ResponseEntity<ProductResponse> response = restTemplate.postForEntity(
+        ResponseEntity<ProductResponse> response = postAuthed(
                 baseUrl() + "/products",
                 new ProductCreateRequest("Headphones", "Noise-cancelling over-ear", new BigDecimal("149.99"), categoryId),
-                ProductResponse.class);
+                ProductResponse.class, writeToken());
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
         assertThat(response.getBody().categoryName()).isEqualTo(categoryName);
@@ -135,11 +227,52 @@ class CatalogControllerIntegrationTest {
     }
 
     @Test
-    void createProduct_withUnknownCategory_returns400() {
-        ResponseEntity<Map> response = restTemplate.postForEntity(
+    void createProduct_withoutToken_returns401() {
+        ResponseEntity<Map> response = postAuthed(
                 baseUrl() + "/products",
                 new ProductCreateRequest("Headphones", null, new BigDecimal("149.99"), UUID.randomUUID()),
-                Map.class);
+                Map.class, null);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
+    @Test
+    void createProduct_withTokenMissingWriteScope_returns403() {
+        // Direct AC coverage: the spec names /products explicitly ("Given a token has no
+        // catalog:write scope, when it's presented to POST /products..."), and only the
+        // /categories variant existed before this test.
+        UUID categoryId = createCategory(uniqueName("ScopeCheck"));
+
+        ResponseEntity<Map> response = postAuthed(
+                baseUrl() + "/products",
+                new ProductCreateRequest("Headphones", null, new BigDecimal("149.99"), categoryId),
+                Map.class, mintToken("catalog:read"));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(response.getBody().get("code")).isEqualTo("FORBIDDEN");
+    }
+
+    @Test
+    void createCategory_withTamperedSignature_returns401() {
+        // Distinct code path from "wrong audience": this fails at signature verification
+        // (SignatureException, a JwtException subtype) before the audience claim is even
+        // read, whereas the wrong-audience test uses a validly-signed token.
+        String validToken = writeToken();
+        String tamperedToken = validToken.substring(0, validToken.length() - 4) + "AAAA";
+
+        ResponseEntity<Map> response = postAuthed(
+                baseUrl() + "/categories", new CategoryCreateRequest(uniqueName("Tampered"), null),
+                Map.class, tamperedToken);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
+    @Test
+    void createProduct_withUnknownCategory_returns400() {
+        ResponseEntity<Map> response = postAuthed(
+                baseUrl() + "/products",
+                new ProductCreateRequest("Headphones", null, new BigDecimal("149.99"), UUID.randomUUID()),
+                Map.class, writeToken());
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
         assertThat(response.getBody().get("code")).isEqualTo("INVALID_CATEGORY_ID");
@@ -149,23 +282,23 @@ class CatalogControllerIntegrationTest {
     void createProduct_withNegativePrice_returns400WithValidationError() {
         UUID categoryId = createCategory(uniqueName("Misc"));
 
-        ResponseEntity<Map> response = restTemplate.postForEntity(
+        ResponseEntity<Map> response = postAuthed(
                 baseUrl() + "/products",
                 new ProductCreateRequest("Broken", null, new BigDecimal("-1.00"), categoryId),
-                Map.class);
+                Map.class, writeToken());
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
         assertThat(response.getBody().get("code")).isEqualTo("VALIDATION_ERROR");
     }
 
-    // --- Product get by id ---------------------------------------------
+    // --- Product get by id (public, no token needed) ---------------------------------------------
 
     @Test
     void getProductById_withKnownId_returns200() {
         UUID categoryId = createCategory(uniqueName("Kitchen"));
-        ProductResponse created = restTemplate.postForEntity(
+        ProductResponse created = postAuthed(
                 baseUrl() + "/products", new ProductCreateRequest("Blender", null, new BigDecimal("39.99"), categoryId),
-                ProductResponse.class).getBody();
+                ProductResponse.class, writeToken()).getBody();
 
         ResponseEntity<ProductResponse> response = restTemplate.getForEntity(baseUrl() + "/products/" + created.id(), ProductResponse.class);
 
@@ -181,16 +314,16 @@ class CatalogControllerIntegrationTest {
         assertThat(response.getBody().get("code")).isEqualTo("PRODUCT_NOT_FOUND");
     }
 
-    // --- Product list/filter/search ---------------------------------------------
+    // --- Product list/filter/search (public, no token needed) ---------------------------------------------
 
     @Test
     void listProducts_filteredByCategory_returnsOnlyThatCategorysProducts() {
         UUID categoryAId = createCategory(uniqueName("CategoryA"));
         UUID categoryBId = createCategory(uniqueName("CategoryB"));
-        restTemplate.postForEntity(baseUrl() + "/products",
-                new ProductCreateRequest("Widget A", null, BigDecimal.TEN, categoryAId), ProductResponse.class);
-        restTemplate.postForEntity(baseUrl() + "/products",
-                new ProductCreateRequest("Widget B", null, BigDecimal.TEN, categoryBId), ProductResponse.class);
+        postAuthed(baseUrl() + "/products",
+                new ProductCreateRequest("Widget A", null, BigDecimal.TEN, categoryAId), ProductResponse.class, writeToken());
+        postAuthed(baseUrl() + "/products",
+                new ProductCreateRequest("Widget B", null, BigDecimal.TEN, categoryBId), ProductResponse.class, writeToken());
 
         ResponseEntity<Map> response = restTemplate.getForEntity(baseUrl() + "/products?categoryId=" + categoryAId, Map.class);
 
@@ -203,10 +336,10 @@ class CatalogControllerIntegrationTest {
     void searchProducts_byNameTerm_returnsMatchingProductsOnly() {
         UUID categoryId = createCategory(uniqueName("Search"));
         String uniqueToken = "Zylophone" + UUID.randomUUID().toString().substring(0, 8);
-        restTemplate.postForEntity(baseUrl() + "/products",
-                new ProductCreateRequest(uniqueToken, "a musical instrument", BigDecimal.TEN, categoryId), ProductResponse.class);
-        restTemplate.postForEntity(baseUrl() + "/products",
-                new ProductCreateRequest("Unrelated Gadget", "does not match", BigDecimal.TEN, categoryId), ProductResponse.class);
+        postAuthed(baseUrl() + "/products",
+                new ProductCreateRequest(uniqueToken, "a musical instrument", BigDecimal.TEN, categoryId), ProductResponse.class, writeToken());
+        postAuthed(baseUrl() + "/products",
+                new ProductCreateRequest("Unrelated Gadget", "does not match", BigDecimal.TEN, categoryId), ProductResponse.class, writeToken());
 
         ResponseEntity<Map> response = restTemplate.getForEntity(baseUrl() + "/products?q=" + uniqueToken, Map.class);
 
@@ -226,14 +359,14 @@ class CatalogControllerIntegrationTest {
         String uniqueToken = "Widgetron" + UUID.randomUUID().toString().substring(0, 8);
 
         // Matches both filters - should be returned.
-        restTemplate.postForEntity(baseUrl() + "/products",
-                new ProductCreateRequest(uniqueToken, null, BigDecimal.TEN, categoryAId), ProductResponse.class);
+        postAuthed(baseUrl() + "/products",
+                new ProductCreateRequest(uniqueToken, null, BigDecimal.TEN, categoryAId), ProductResponse.class, writeToken());
         // Matches the term but the wrong category - must be excluded.
-        restTemplate.postForEntity(baseUrl() + "/products",
-                new ProductCreateRequest(uniqueToken, null, BigDecimal.TEN, categoryBId), ProductResponse.class);
+        postAuthed(baseUrl() + "/products",
+                new ProductCreateRequest(uniqueToken, null, BigDecimal.TEN, categoryBId), ProductResponse.class, writeToken());
         // Matches the category but not the term - must be excluded.
-        restTemplate.postForEntity(baseUrl() + "/products",
-                new ProductCreateRequest("Unrelated Gadget", null, BigDecimal.TEN, categoryAId), ProductResponse.class);
+        postAuthed(baseUrl() + "/products",
+                new ProductCreateRequest("Unrelated Gadget", null, BigDecimal.TEN, categoryAId), ProductResponse.class, writeToken());
 
         ResponseEntity<Map> response = restTemplate.getForEntity(
                 baseUrl() + "/products?categoryId=" + categoryAId + "&q=" + uniqueToken, Map.class);
@@ -248,13 +381,13 @@ class CatalogControllerIntegrationTest {
     void searchProducts_byTermContainingLikeWildcards_treatsThemAsLiteralCharacters() {
         UUID categoryId = createCategory(uniqueName("Wildcard"));
         String literalToken = "100%_off-" + UUID.randomUUID().toString().substring(0, 8);
-        restTemplate.postForEntity(baseUrl() + "/products",
-                new ProductCreateRequest(literalToken, null, BigDecimal.TEN, categoryId), ProductResponse.class);
+        postAuthed(baseUrl() + "/products",
+                new ProductCreateRequest(literalToken, null, BigDecimal.TEN, categoryId), ProductResponse.class, writeToken());
         // Would also match "100%_off..." under an unescaped ILIKE '%100X_off%' pattern
         // (any single character for '_', anything for '%') - must NOT be returned once
         // '%' and '_' are escaped to their literal meaning.
-        restTemplate.postForEntity(baseUrl() + "/products",
-                new ProductCreateRequest("100Xoff-decoy", null, BigDecimal.TEN, categoryId), ProductResponse.class);
+        postAuthed(baseUrl() + "/products",
+                new ProductCreateRequest("100Xoff-decoy", null, BigDecimal.TEN, categoryId), ProductResponse.class, writeToken());
 
         // literalToken contains a raw '%' - build the URI properly rather than string-
         // concatenating it into the URL, since '%' is a reserved URI escape character.

@@ -19,7 +19,9 @@ import java.util.List;
  * Layered architecture, API tier: thin - validates input shape via
  * {@code @Valid} and delegates every business decision to the command/query
  * services. Versioned under {@code /api/v1/catalog} per the repo's API
- * convention. v1 has no auth: both endpoints are open (see README).
+ * convention. {@code GET} is open; {@code POST} requires a service-to-service
+ * JWT (minted by api-portal-service) carrying the {@code catalog:write}
+ * scope - see {@code security.SecurityConfig} and the README's S2S section.
  */
 @RestController
 @RequestMapping("/api/v1/catalog/categories")

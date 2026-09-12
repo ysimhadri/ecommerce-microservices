@@ -12,10 +12,10 @@
   </parent>
 
   <groupId>com.ecommerce</groupId>
-  <artifactId>product-catalog-service</artifactId>
+  <artifactId>api-portal-service</artifactId>
   <version>0.1.0</version>
-  <name>product-catalog-service</name>
-  <description>Product Catalog microservice - categories, products, search, CQRS-lite read path with caching</description>
+  <name>api-portal-service</name>
+  <description>API Portal microservice - service-to-service (S2S) client-credentials JWT issuance: register producer/consumer services, declare producer APIs, grant scoped access, mint HS256 tokens</description>
 
   <properties>
     <java.version>21</java.version>
@@ -27,15 +27,6 @@
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-web</artifactId>
-    </dependency>
-
-    <!-- Validates api-portal-service-issued S2S JWTs on the write endpoints
-         only (see security package) - reads stay open. Full starter, not
-         just spring-security-crypto, because this service does need an
-         actual filter chain/authorizeHttpRequests, unlike api-portal-service. -->
-    <dependency>
-      <groupId>org.springframework.boot</groupId>
-      <artifactId>spring-boot-starter-security</artifactId>
     </dependency>
 
     <!-- Persistence: Repository pattern via Spring Data JPA -->
@@ -50,20 +41,33 @@
       <artifactId>spring-boot-starter-validation</artifactId>
     </dependency>
 
-    <!-- Spring's cache abstraction (@Cacheable/@CacheEvict) backing the
-         read-optimized query side; see CacheConfig for the CQRS rationale. -->
+    <!-- Only the crypto module, not the full starter: v1's admin API is
+         intentionally open (see README) so there is no filter chain to
+         wire up here - this pulls in just the PasswordEncoder abstraction
+         (Strategy pattern) used to hash client secrets at rest. -->
     <dependency>
-      <groupId>org.springframework.boot</groupId>
-      <artifactId>spring-boot-starter-cache</artifactId>
-    </dependency>
-    <dependency>
-      <groupId>com.github.ben-manes.caffeine</groupId>
-      <artifactId>caffeine</artifactId>
+      <groupId>org.springframework.security</groupId>
+      <artifactId>spring-security-crypto</artifactId>
     </dependency>
 
-    <!-- Validates the HS256 signature/claims of api-portal-service-issued tokens.
-         Duplicated from api-portal-service's own signing dependency (same
-         version) rather than a shared library - see PortalJwtValidator. -->
+    <!-- Datastore: PostgreSQL, owned solely by this service -->
+    <dependency>
+      <groupId>org.postgresql</groupId>
+      <artifactId>postgresql</artifactId>
+      <scope>runtime</scope>
+    </dependency>
+
+    <!-- Schema managed via Flyway migrations, never ddl-auto -->
+    <dependency>
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-core</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-database-postgresql</artifactId>
+    </dependency>
+
+    <!-- Stateless HS256 service-to-service JWT issuance (client-credentials grant) -->
     <dependency>
       <groupId>io.jsonwebtoken</groupId>
       <artifactId>jjwt-api</artifactId>
@@ -80,23 +84,6 @@
       <artifactId>jjwt-jackson</artifactId>
       <version>${jjwt.version}</version>
       <scope>runtime</scope>
-    </dependency>
-
-    <!-- Datastore: PostgreSQL, owned solely by this service (no shared DB with auth-service) -->
-    <dependency>
-      <groupId>org.postgresql</groupId>
-      <artifactId>postgresql</artifactId>
-      <scope>runtime</scope>
-    </dependency>
-
-    <!-- Schema managed via Flyway migrations, never ddl-auto -->
-    <dependency>
-      <groupId>org.flywaydb</groupId>
-      <artifactId>flyway-core</artifactId>
-    </dependency>
-    <dependency>
-      <groupId>org.flywaydb</groupId>
-      <artifactId>flyway-database-postgresql</artifactId>
     </dependency>
 
     <!-- Test -->
@@ -120,15 +107,10 @@
       <artifactId>postgresql</artifactId>
       <scope>test</scope>
     </dependency>
-    <dependency>
-      <groupId>org.springframework.security</groupId>
-      <artifactId>spring-security-test</artifactId>
-      <scope>test</scope>
-    </dependency>
     <!-- See auth-service/pom.xml for why: the JDK's default HttpURLConnection-backed
          client mishandles retrying a POST after certain error responses in streaming
-         mode - Apache HttpClient does not have this issue. Several write-path tests
-         now deliberately provoke a 401/403 (see PortalJwtValidator). -->
+         mode - Apache HttpClient does not have this issue. Several tests here
+         deliberately provoke 401s on /oauth/token. -->
     <dependency>
       <groupId>org.apache.httpcomponents.client5</groupId>
       <artifactId>httpclient5</artifactId>
