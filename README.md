@@ -8,6 +8,7 @@ services/
   auth-service/             # User/Auth — register, login, JWT issuance, profile lookup
   product-catalog-service/  # Product Catalog — categories, products, search, CQRS-lite + caching
   api-portal-service/       # API Portal — service-to-service (S2S) client-credentials JWT issuance
+  eligibility-api/          # Eligibility — financial product eligibility (Redis, Resilience4j, Feign, Eureka)
 ```
 
 Each service:
@@ -229,6 +230,28 @@ curl -s -X POST localhost:8081/api/v1/catalog/products \
 # -> 201, product body — without the Authorization header this is a 401
 ```
 
+### eligibility-api
+
+Financial product eligibility for `CREDIT_CARD` / `PERSONAL_LOAN` / `MORTGAGE`.
+See [`services/eligibility-api`](services/eligibility-api) for source, curl
+examples, and how to demo circuit-breaker fallback and HTTP 429.
+
+Stack: Java 21, Spring Boot 3.3.x, Spring Cloud 2023.0.x, H2 (own file/mem
+database — never shared), Redis cache, Resilience4j, OpenFeign, Eureka client,
+Actuator + Prometheus.
+
+**API** (`/api/eligibility`):
+
+| Method | Path | Auth | Purpose |
+|--------|------|------|---------|
+| GET | `/{customerId}?productType=` | public | Score eligibility (Redis-cached 10 min) |
+| POST | `/demo/credit-bureau/fail?enabled=` | public | Force the mock credit bureau down |
+
+A Spring Cloud Gateway *route scaffold* (not a running gateway) is at
+[`docs/gateway-eligibility-route.yml`](docs/gateway-eligibility-route.yml):
+`/eligibility/**` → `lb://eligibility-api` with Authorization and `X-Request-Id`
+propagation. API Gateway as a service remains deferred.
+
 ## Running locally
 
 From the repo root:
@@ -238,10 +261,12 @@ docker compose up --build
 ```
 
 This starts `auth-postgres` + `auth-service`, `catalog-postgres` +
-`product-catalog-service`, and `portal-postgres` + `api-portal-service`,
-all on the shared `ecommerce-net` network. `auth-service` is reachable at
+`product-catalog-service`, `portal-postgres` + `api-portal-service`, and
+`eligibility-redis` + `eligibility-eureka` + `eligibility-api`, all on the
+shared `ecommerce-net` network. `auth-service` is reachable at
 `http://localhost:8080`, `product-catalog-service` at
-`http://localhost:8081`, `api-portal-service` at `http://localhost:8082`.
+`http://localhost:8081`, `api-portal-service` at `http://localhost:8082`,
+`eligibility-api` at `http://localhost:8083`.
 Each service's Postgres data persists across restarts in its own named
 volume; Flyway migrations re-apply idempotently on every boot.
 
@@ -282,13 +307,14 @@ a token, and uses it to create a category and a product end-to-end.
 ## Running the tests
 
 ```bash
-cd services/auth-service   # or services/product-catalog-service, or services/api-portal-service
+cd services/auth-service   # or product-catalog-service, api-portal-service, eligibility-api
 mvn test
 ```
 
-Unit tests cover the service-layer logic; the integration test spins up a
-real PostgreSQL via Testcontainers and exercises the HTTP endpoints
-end-to-end, so Docker must be running locally to execute it.
+Unit tests cover the service-layer logic. Auth/catalog/portal integration
+tests spin up a real PostgreSQL via Testcontainers (Docker must be running).
+`eligibility-api` tests run fully offline (H2 + stub profile, Eureka/Redis
+disabled).
 
 ## Deferred work
 
@@ -312,7 +338,8 @@ above. Service-to-service auth is also no longer deferred — see
 producer validate client-credentials JWTs; it does not route requests,
 aggregate responses, rate-limit, or provide a single ingress point for
 external clients. API Gateway remains deferred, above, as its own
-independent piece of work.
+independent piece of work. `docs/gateway-eligibility-route.yml` is only a
+route snippet for when that gateway is built.
 
 `auth-service` also does not implement OAuth/social login or refresh-token
 rotation, and does not publish events to any message broker — none exists

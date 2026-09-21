@@ -1,0 +1,192 @@
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  application:
+    name: eligibility-api
+  datasource:
+    url: jdbc:h2:file:${ELIGIBILITY_DB_PATH:./data/eligibility};MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH;AUTO_SERVER=TRUE
+    driver-class-name: org.h2.Driver
+    username: ${DB_USERNAME:sa}
+    password: ${DB_PASSWORD:}
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        format_sql: true
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  cache:
+    type: redis
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 2s
+  cloud:
+    openfeign:
+      client:
+        config:
+          default:
+            connectTimeout: 2000
+            readTimeout: 3000
+
+eureka:
+  client:
+    enabled: ${EUREKA_ENABLED:true}
+    register-with-eureka: ${EUREKA_ENABLED:true}
+    fetch-registry: ${EUREKA_ENABLED:true}
+    service-url:
+      defaultZone: ${EUREKA_URI:http://localhost:8761/eureka}
+  instance:
+    prefer-ip-address: true
+
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        registerHealthIndicator: true
+        slidingWindowSize: 10
+        minimumNumberOfCalls: 5
+        failureRateThreshold: 50
+        waitDurationInOpenState: 10s
+        permittedNumberOfCallsInHalfOpenState: 2
+        automaticTransitionFromOpenToHalfOpenEnabled: true
+        recordExceptions:
+          - com.ecommerce.eligibility.exception.CreditBureauUnavailableException
+          - org.springframework.web.client.RestClientException
+    instances:
+      creditBureau:
+        baseConfig: default
+  ratelimiter:
+    instances:
+      eligibility:
+        limitForPeriod: 50
+        limitRefreshPeriod: 1s
+        timeoutDuration: 0s
+        registerHealthIndicator: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics,prometheus,info,circuitbreakers,ratelimiters
+  endpoint:
+    health:
+      show-details: always
+      show-components: always
+  health:
+    circuitbreakers:
+      enabled: true
+    ratelimiters:
+      enabled: true
+    redis:
+      enabled: true
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
+app:
+  cache:
+    eligibility-ttl: 10m
+  credit-bureau:
+    mode: ${CREDIT_BUREAU_MODE:mock}
+    url: ${CREDIT_BUREAU_URL:http://localhost:9090}
+    force-fail: ${CREDIT_BUREAU_FORCE_FAIL:false}
+  customer-profile:
+    stub: ${CUSTOMER_PROFILE_STUB:true}
+    client: ${CUSTOMER_PROFILE_CLIENT:feign}
+
+logging:
+  level:
+    com.ecommerce.eligibility: INFO
+
+---
+# Offline / local-without-infra: H2 + in-process cache, no Eureka, no Redis.
+spring:
+  config:
+    activate:
+      on-profile: test
+  cache:
+    type: simple
+  datasource:
+    url: jdbc:h2:mem:eligibility;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH;DB_CLOSE_DELAY=-1
+    username: sa
+    password:
+  h2:
+    console:
+      enabled: false
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.redis.RedisRepositoriesAutoConfiguration
+      - org.springframework.boot.actuate.autoconfigure.redis.RedisHealthContributorAutoConfiguration
+  cloud:
+    discovery:
+      enabled: false
+    openfeign:
+      client:
+        config:
+          customer-profile-service:
+            url: http://localhost:65534
+
+eureka:
+  client:
+    enabled: false
+    register-with-eureka: false
+    fetch-registry: false
+
+management:
+  health:
+    redis:
+      enabled: false
+
+app:
+  customer-profile:
+    stub: true
+    client: feign
+  credit-bureau:
+    mode: mock
+    force-fail: false
+
+---
+spring:
+  config:
+    activate:
+      on-profile: local
+  cache:
+    type: simple
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.redis.RedisRepositoriesAutoConfiguration
+      - org.springframework.boot.actuate.autoconfigure.redis.RedisHealthContributorAutoConfiguration
+  cloud:
+    discovery:
+      enabled: false
+
+eureka:
+  client:
+    enabled: false
+    register-with-eureka: false
+    fetch-registry: false
+
+management:
+  health:
+    redis:
+      enabled: false
+
+app:
+  customer-profile:
+    stub: true

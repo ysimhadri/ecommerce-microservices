@@ -1,0 +1,47 @@
+# Scaffold only — this repo does not yet run a Spring Cloud Gateway process
+# (API Gateway remains deferred). Drop this into a gateway application's
+# application.yml when that service is built.
+#
+# Route: /eligibility/** → eligibility-api (Eureka lb://eligibility-api)
+# Filters propagate Authorization and X-Request-Id to the downstream service.
+
+spring:
+  cloud:
+    gateway:
+      # Authorization is in the default sensitive-headers set; clear it so
+      # the token is forwarded. Hop-by-hop headers are still stripped.
+      default-filters:
+        - DedupeResponseHeader=Access-Control-Allow-Credentials Access-Control-Allow-Origin
+      routes:
+        - id: eligibility-api
+          uri: lb://eligibility-api
+          predicates:
+            - Path=/eligibility/**
+          filters:
+            - PreserveHostHeader
+            - name: Retry
+              args:
+                retries: 1
+                methods: GET
+            # Explicitly copy identity + correlation headers onto the outbound request.
+            - name: AddRequestHeader
+              args:
+                name: X-Request-Id
+                value: "{X-Request-Id}"
+          metadata:
+            # Empty sensitiveHeaders => do not strip Authorization / Cookie.
+            sensitiveHeaders: ""
+
+# Equivalent custom filter (Java) if YAML header copy is not enough:
+#
+#   class HeaderPropagationGatewayFilter implements GlobalFilter {
+#       public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
+#           String auth = exchange.getRequest().getHeaders().getFirst(HttpHeaders.AUTHORIZATION);
+#           String requestId = exchange.getRequest().getHeaders().getFirst("X-Request-Id");
+#           ServerHttpRequest.Builder builder = exchange.getRequest().mutate();
+#           if (auth != null) builder.header(HttpHeaders.AUTHORIZATION, auth);
+#           if (requestId != null) builder.header("X-Request-Id", requestId);
+#           else builder.header("X-Request-Id", UUID.randomUUID().toString());
+#           return chain.filter(exchange.mutate().request(builder.build()).build());
+#       }
+#   }

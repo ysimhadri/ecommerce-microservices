@@ -1,0 +1,25 @@
+# Redis + mock Eureka for local eligibility-api demos.
+# From this directory: docker compose up -d
+# Then run the app with REDIS_HOST=localhost EUREKA_URI=http://localhost:8761/eureka
+#
+# The root docker-compose.yml also starts these alongside eligibility-api.
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: eligibility-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  eureka:
+    image: steeltoeoss/eureka-server:4.1.4
+    container_name: eligibility-eureka
+    ports:
+      - "8761:8761"
+    environment:
+      SERVER_PORT: 8761
