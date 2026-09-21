@@ -7,14 +7,13 @@ import org.springframework.stereotype.Component;
 import java.math.BigDecimal;
 
 /**
- * In-process stand-in for {@code customer-profile-service}. Used whenever
- * that service (and Eureka) are not running — tests, local demos, and
- * docker-compose of this module alone.
+ * In-process stand-in for {@code customer-profile-service}. Used by
+ * {@link CustomerProfileGateway} whenever that service (and Eureka) are not
+ * running. Not a {@link CustomerProfileClient} bean — only the gateway is.
  */
 @Component
-public class StubCustomerProfileClient implements CustomerProfileClient {
+public class StubCustomerProfileClient {
 
-    @Override
     public CustomerProfileResponse getProfile(String customerId) {
         if (customerId == null || customerId.isBlank() || customerId.equalsIgnoreCase("unknown")) {
             throw new CustomerNotFoundException(customerId == null ? "null" : customerId);

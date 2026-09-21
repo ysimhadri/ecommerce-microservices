@@ -64,22 +64,22 @@ baseline_commit: '38fbc5c6714ba8ea048eca603af09c335be4b295'
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `services/eligibility-api/pom.xml` -- Boot 3.3.4, Java 21, Cloud 2023.0.3 BOM; web, jpa, validation, cache, data-redis, aop, actuator, prometheus, h2, flyway, eureka-client, openfeign, loadbalancer, resilience4j-spring-boot3, starter-test
-- [ ] `services/eligibility-api/src/main/java/com/ecommerce/eligibility/EligibilityApiApplication.java` -- `@SpringBootApplication` + `@EnableFeignClients` + `@EnableDiscoveryClient`
-- [ ] Package layout `controller/`, `service/`, `client/`, `config/`, `model/`, `repository/`, `health/`, `exception/` (dto as needed)
-- [ ] Redis `@Cacheable` + `CacheConfig` TTL 10m, key customerId+productType
-- [ ] `@CircuitBreaker` credit-bureau client + fallback + force-failable mock
-- [ ] `@Async("auditExecutor")` audit entity + `ThreadPoolTaskExecutor` bean
-- [ ] `@RateLimiter` ~50/s + 429 handler
-- [ ] `@Transactional` decision + history dual-write
-- [ ] `@LoadBalanced` RestTemplate (or WebClient) bean; `@FeignClient` for customer-profile-service
-- [ ] `application.yml` Redis, R4j CB+RL, Eureka, bureau URL, datasource, actuator, cache TTL; test profile offline
-- [ ] Custom HealthIndicator for Redis + CB state; actuator health/metrics/prometheus
-- [ ] `docs/gateway-eligibility-route.yml` (and/or service docs) `/eligibility/**` → eligibility-api with Authorization + X-Request-Id propagation
-- [ ] docker-compose snippet Redis + mock Eureka; root compose entry for the service
-- [ ] `services/eligibility-api/README.md` run, curl, CB fallback demo, 429 demo
-- [ ] Tests: CB fallback → manual review required; rate limiter excess → 429; `mvn test` offline
-- [ ] Root `README.md` + `docker-compose.yml` updated
+- [x] `services/eligibility-api/pom.xml` -- Boot 3.3.4, Java 21, Cloud 2023.0.3 BOM; web, jpa, validation, cache, data-redis, aop, actuator, prometheus, h2, flyway, eureka-client, openfeign, loadbalancer, resilience4j-spring-boot3, starter-test
+- [x] `services/eligibility-api/src/main/java/com/ecommerce/eligibility/EligibilityApiApplication.java` -- `@SpringBootApplication` + `@EnableFeignClients` + `@EnableDiscoveryClient`
+- [x] Package layout `controller/`, `service/`, `client/`, `config/`, `model/`, `repository/`, `health/`, `exception/` (dto as needed)
+- [x] Redis `@Cacheable` + `CacheConfig` TTL 10m, key customerId+productType
+- [x] `@CircuitBreaker` credit-bureau client + fallback + force-failable mock
+- [x] `@Async("auditExecutor")` audit entity + `ThreadPoolTaskExecutor` bean
+- [x] `@RateLimiter` ~50/s + 429 handler
+- [x] `@Transactional` decision + history dual-write
+- [x] `@LoadBalanced` RestTemplate (or WebClient) bean; `@FeignClient` for customer-profile-service
+- [x] `application.yml` Redis, R4j CB+RL, Eureka, bureau URL, datasource, actuator, cache TTL; test profile offline
+- [x] Custom HealthIndicator for Redis + CB state; actuator health/metrics/prometheus
+- [x] `docs/gateway-eligibility-route.yml` (and/or service docs) `/eligibility/**` → eligibility-api with Authorization + X-Request-Id propagation
+- [x] docker-compose snippet Redis + mock Eureka; root compose entry for the service
+- [x] `services/eligibility-api/README.md` run, curl, CB fallback demo, 429 demo
+- [x] Tests: CB fallback → manual review required; rate limiter excess → 429; `mvn test` offline
+- [x] Root `README.md` + `docker-compose.yml` updated
 
 **Acceptance Criteria:**
 - Given the test profile, when `mvn test` runs with no Redis/Eureka/Docker, then the build is green.
@@ -90,6 +90,8 @@ baseline_commit: '38fbc5c6714ba8ea048eca603af09c335be4b295'
 ## Implementation Notes
 
 Decisions recorded at planning (not user-visible product forks): package `com.ecommerce.eligibility`; host port 8083; GET left unauthenticated so the pattern demo does not depend on api-portal; default local/test `app.customer-profile.stub=true` because that service is not in the repo; H2 (PostgreSQL mode) rather than Testcontainers Postgres; rate-limiter test uses a tighter window via test properties so 429 is deterministic.
+
+Feign `@FeignClient` beans are `@Primary` by default and must not implement `CustomerProfileClient`, or Spring reports multiple primary beans. Only `CustomerProfileGateway` implements that interface; the Feign client and stub are collaborators. `mvn test`: 11 tests, BUILD SUCCESS (offline).
 
 ## Spec Change Log
 

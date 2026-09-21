@@ -7,14 +7,14 @@ import org.springframework.web.bind.annotation.PathVariable;
 
 /**
  * Declarative client for {@code customer-profile-service}. Discovered by
- * Eureka name unless {@code spring.cloud.openfeign.client.config.customer-profile-service.url}
- * is set. Local/test traffic goes through {@link CustomerProfileGateway}'s stub
- * so this client is not invoked offline.
+ * Eureka name. Does not implement {@link CustomerProfileClient} so the Feign
+ * proxy is not a competing injection candidate (Feign marks its beans
+ * {@code @Primary}). {@link CustomerProfileGateway} is the single API used
+ * by the engine.
  */
 @FeignClient(name = "customer-profile-service")
-public interface CustomerProfileFeignClient extends CustomerProfileClient {
+public interface CustomerProfileFeignClient {
 
-    @Override
     @GetMapping("/api/v1/customers/{customerId}")
     CustomerProfileResponse getProfile(@PathVariable("customerId") String customerId);
 }
