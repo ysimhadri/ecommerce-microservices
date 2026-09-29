@@ -8,6 +8,9 @@ services/
   auth-service/             # User/Auth — register, login, JWT issuance, profile lookup
   product-catalog-service/  # Product Catalog — categories, products, search, CQRS-lite + caching
   api-portal-service/       # API Portal — service-to-service (S2S) client-credentials JWT issuance
+  cart-service/             # Cart — per-user carts the order saga can lock, clear, and restore
+  inventory-service/        # Inventory — stock and all-or-nothing reservations (optimistic locking)
+  order-service/            # Order — place an order with an in-process saga
 ```
 
 Each service:
@@ -165,6 +168,82 @@ comments too):
 | Layered architecture        | Controller → Service (registry/grant/token) → Repository, each single-responsibility |
 | Centralized error handling  | `GlobalExceptionHandler` (`@ControllerAdvice`) maps domain exceptions (unknown audience, missing grant, scope not granted, ...) to HTTP responses in one place |
 
+### cart-service
+
+Shopping carts owned by the user id in an `auth-service` access token.
+See [`services/cart-service`](services/cart-service). The order saga is the
+only caller of lock, unlock, clear, and restore; it forwards the same user
+token. Clear hides lines (`CHECKED_OUT`) without deleting them. Restore
+returns `ACTIVE` with those lines.
+
+Host port **8083**. Database `cartdb`.
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| POST | `/api/v1/carts` | Create an empty `ACTIVE` cart. 201. |
+| GET | `/api/v1/carts/{id}` | Owner only. 404 / 403 / 401. |
+| POST | `/api/v1/carts/{id}/items` | Add a product. Same product merges quantities. |
+| POST | `/api/v1/carts/{id}/lock` | `ACTIVE` → `LOCKED`. |
+| POST | `/api/v1/carts/{id}/unlock` | `LOCKED` → `ACTIVE`. |
+| POST | `/api/v1/carts/{id}/clear` | `LOCKED` → `CHECKED_OUT` (lines kept). |
+| POST | `/api/v1/carts/{id}/restore` | `CHECKED_OUT` → `ACTIVE` with the same lines. |
+
+### inventory-service
+
+Stock and reservations. Catalog is not given a stock column and is not
+written here. See [`services/inventory-service`](services/inventory-service).
+Stock rows use `@Version`. A hold is all-or-nothing per order and idempotent
+for the same `orderId`.
+
+Host port **8084**. Database `inventorydb`. `PUT` and `GET` stock are open
+so a demo can seed units. Reservation commands require the user JWT.
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| PUT | `/api/v1/inventory/stock/{productId}` | Upsert `{available}`. 400 if negative. |
+| GET | `/api/v1/inventory/stock/{productId}` | Free and reserved counts. |
+| POST | `/api/v1/inventory/reservations` | Hold `{orderId, lines}`. |
+| POST | `/api/v1/inventory/reservations/{id}/release` | Restore available. |
+| POST | `/api/v1/inventory/reservations/{id}/commit` | Drop reserved; available stays down. |
+| POST | `/api/v1/inventory/reservations/{id}/revert` | Restore available after commit. |
+
+### order-service
+
+Checkout. `OrderSagaOrchestrator` is the only coordinator. It calls the
+other services with Spring `RestClient` (`CartClient`, `InventoryClient`,
+`CatalogClient`) and a `MockPaymentGateway`. There is no broker. See
+[`services/order-service`](services/order-service) for the full step list.
+
+Host port **8085**. Database `orderdb`. Compose sets `CART_SERVICE_URL`,
+`INVENTORY_SERVICE_URL`, `CATALOG_SERVICE_URL`, and `JWT_SECRET`.
+
+`POST /api/v1/orders` with `{cartId, simulatePaymentFailure?}`.
+Happy path is 201 `CONFIRMED`. A compensated failure is 409
+`{orderId, status: CANCELLED, code, message}` (`PAYMENT_DECLINED` or
+`INSUFFICIENT_STOCK`). Cancelled orders are not deleted. The cart is not
+cleared before payment succeeds.
+
+Saga (forward), then compensate completed steps in reverse:
+
+1. Load an `ACTIVE` non-empty cart owned by the caller.
+2. Read each product from the catalog and snapshot name and price. Unknown id → 400, no order row.
+3. Insert `PENDING`.
+4. Lock the cart (compensate: unlock).
+5. Reserve stock (compensate: release).
+6. Authorize mock payment (compensate: void — only if this step completed).
+7. Commit the reservation (compensate: revert).
+8. Clear the cart (compensate: restore).
+9. Mark `CONFIRMED`.
+
+A declined payment (`simulatePaymentFailure: true`) did not complete
+authorize, so the compensation is release then unlock. Insufficient stock
+fails at reserve, so only unlock runs.
+
+**Tradeoff:** compensation is immediate and easy to test, and a crash
+mid-request is not replayed. A `PENDING` order and a `LOCKED` cart can
+remain if the process dies. That recovery job is out of scope. There is
+no real payment provider.
+
 ### Service-to-service (S2S) auth flow
 
 The end-to-end shape every future producer service will follow to protect
@@ -237,11 +316,17 @@ From the repo root:
 docker compose up --build
 ```
 
-This starts `auth-postgres` + `auth-service`, `catalog-postgres` +
-`product-catalog-service`, and `portal-postgres` + `api-portal-service`,
-all on the shared `ecommerce-net` network. `auth-service` is reachable at
-`http://localhost:8080`, `product-catalog-service` at
-`http://localhost:8081`, `api-portal-service` at `http://localhost:8082`.
+This starts each service with its own Postgres on the shared `ecommerce-net`
+network:
+
+| Service | Host port |
+|---------|-----------|
+| `auth-service` | 8080 |
+| `product-catalog-service` | 8081 |
+| `api-portal-service` | 8082 |
+| `cart-service` | 8083 |
+| `inventory-service` | 8084 |
+| `order-service` | 8085 |
 Each service's Postgres data persists across restarts in its own named
 volume; Flyway migrations re-apply idempotently on every boot.
 
@@ -282,7 +367,7 @@ a token, and uses it to create a category and a product end-to-end.
 ## Running the tests
 
 ```bash
-cd services/auth-service   # or services/product-catalog-service, or services/api-portal-service
+cd services/auth-service   # or product-catalog-service, api-portal-service, cart-service, inventory-service, order-service
 mvn test
 ```
 
@@ -298,15 +383,12 @@ ecommerce platform" scope and deliberately **not** built here — see
 for details:
 
 - API Gateway
-- Cart Service
-- Order Service
-- Payment Service
-- Inventory Service
+- Payment Service (a real provider — order-service ships a mock decline switch only)
 - Notification Service
 
-Product Catalog Service is no longer deferred — see `product-catalog-service`
-above. Service-to-service auth is also no longer deferred — see
-`api-portal-service` and the S2S flow above.
+Product Catalog, API Portal, Cart, the minimal Inventory service, and Order
+(in-process saga, mock payment) are built — see the service sections above.
+Durable saga crash recovery is not built; see `order-service`.
 
 **`api-portal-service` is not an API Gateway.** It issues and lets a
 producer validate client-credentials JWTs; it does not route requests,

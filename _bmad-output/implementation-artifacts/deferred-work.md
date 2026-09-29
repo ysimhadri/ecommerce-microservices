@@ -11,27 +11,30 @@
   evidence: Product Catalog's writes were open (v1 scope cut, see its README section's history); once a second internal caller needed to write to it, some form of S2S auth became necessary. `auth-service` was explicitly kept human-user-only rather than overloaded into a second responsibility.
   status: Built in `services/api-portal-service` (branch `feat/api-portal-service`) — service registration, producer API declaration, consumer grants (auto-approved, no human workflow), and the `/oauth/token` client-credentials endpoint. `product-catalog-service`'s `POST /categories` and `POST /products` now require a valid token with the `catalog:write` scope; its `GET` endpoints remain public. See root README's `api-portal-service` section and "Service-to-service (S2S) auth flow" for the full picture, including why this is deliberately *not* the API Gateway below.
 
+- source_spec: `_bmad-output/implementation-artifacts/spec-cart-order-saga.md`
+  summary: Cart Service — per-user carts that an in-process order saga can lock, clear, and restore without dropping lines.
+  evidence: Built as part of placing an order from a cart. Clear hides lines (`CHECKED_OUT`) and restore returns the same `ACTIVE` lines. See `services/cart-service`.
+  status: Built in `services/cart-service`.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-cart-order-saga.md`
+  summary: Order Service — checkout from a cart with an in-process saga (mock payment, not a payment provider).
+  evidence: `OrderSagaOrchestrator` calls cart, inventory, and catalog over HTTP and compensates completed steps in reverse inside the same request. No broker and no crash-recovery job. See `services/order-service`.
+  status: Built in `services/order-service`.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-cart-order-saga.md`
+  summary: Inventory Service — minimal stock and all-or-nothing reservations with optimistic locking, enough for the order saga to reserve and release.
+  evidence: Catalog still has no stock. Hold, release, commit, and revert live in `services/inventory-service`. This is not a broader inventory product.
+  status: Built in `services/inventory-service`.
+
 ## Still deferred
 
 - source_spec: none
-  summary: Cart Service — shopping cart state management demonstrating session/state-management patterns.
-  evidence: Split from the original "microservices ecommerce platform" intent as an independently shippable service; deferred behind the foundational User/Auth Service.
-
-- source_spec: none
-  summary: Order Service — checkout and order lifecycle demonstrating the Saga/orchestration pattern across Payment and Inventory.
-  evidence: Split from the original "microservices ecommerce platform" intent as an independently shippable service; deferred behind the foundational User/Auth Service.
-
-- source_spec: none
-  summary: Payment Service — payment processing demonstrating idempotency and circuit-breaker patterns.
-  evidence: Split from the original "microservices ecommerce platform" intent as an independently shippable service; deferred behind the foundational User/Auth Service.
-
-- source_spec: none
-  summary: Inventory Service — stock tracking and reservation demonstrating optimistic locking.
-  evidence: Split from the original "microservices ecommerce platform" intent as an independently shippable service; deferred behind the foundational User/Auth Service.
+  summary: Payment Service — a real payment provider, with idempotency and circuit-breaker patterns.
+  evidence: Split from the original "microservices ecommerce platform" intent. `order-service` only has `MockPaymentGateway` (`simulatePaymentFailure`). No capture, no provider, no circuit breaker.
 
 - source_spec: none
   summary: Notification Service — order/payment event notifications demonstrating pub/sub, event-driven architecture.
-  evidence: Split from the original "microservices ecommerce platform" intent as an independently shippable service; deferred behind the foundational User/Auth Service.
+  evidence: Split from the original "microservices ecommerce platform" intent as an independently shippable service; deferred behind the foundational User/Auth Service. The order saga does not publish events.
 
 - source_spec: none
   summary: API Gateway — single entry point demonstrating the gateway/BFF pattern with routing and aggregation.
