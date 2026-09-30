@@ -89,6 +89,14 @@ class EligibilityControllerIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void overlongCustomerId_returns400() {
+        ResponseEntity<Map> response = restTemplate.getForEntity(
+                url("x".repeat(65), "CREDIT_CARD"), Map.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+    }
+
+    @Test
     void repeatedCheck_isServedFromCacheWithoutNewDecisionRow() {
         String customerId = "high-score-" + UUID.randomUUID();
 

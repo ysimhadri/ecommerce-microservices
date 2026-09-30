@@ -3,6 +3,8 @@ package com.ecommerce.eligibility.controller;
 import com.ecommerce.eligibility.dto.EligibilityResponse;
 import com.ecommerce.eligibility.model.ProductType;
 import com.ecommerce.eligibility.service.EligibilityService;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -25,7 +27,7 @@ public class EligibilityController {
 
     @GetMapping("/{customerId}")
     public ResponseEntity<EligibilityResponse> check(
-            @PathVariable String customerId,
+            @PathVariable @NotBlank @Size(max = 64) String customerId,
             @RequestParam ProductType productType) {
         return ResponseEntity.ok(eligibilityService.check(customerId, productType));
     }

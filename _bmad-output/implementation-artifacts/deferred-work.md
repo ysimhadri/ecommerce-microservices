@@ -57,7 +57,8 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-eligibility-api.md`
   summary: Redis outages fail every eligibility request; no CacheErrorHandler.
   evidence: `@Cacheable` get/put errors propagate as 500 although computation would succeed.
+  status: Resolved — `CacheConfig` now logs and swallows cache errors.
 
 - source_spec: `_bmad-output/implementation-artifacts/spec-eligibility-api.md`
-  summary: Input and dependency hardening: customerId length/blank validation, audit executor rejection, customer-profile 5xx/null handling, concurrent first-check race, reason truncation.
+  summary: Input and dependency hardening (customerId validation now done; remaining): audit executor rejection, customer-profile 5xx/null handling, concurrent first-check race, reason truncation.
   evidence: Each currently surfaces as a generic 500 (customerId > 64 chars overflows VARCHAR(64)).

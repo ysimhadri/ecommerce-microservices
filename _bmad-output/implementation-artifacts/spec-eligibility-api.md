@@ -106,8 +106,8 @@ Feign `@FeignClient` beans are `@Primary` by default and must not implement `Cus
 | Decision rules / KYC / cache-hit untested | medium | patch | Added `EligibilityEngineTest`, low-score, unverified, cache-hit tests. |
 | Gateway YAML: no RewritePath, bogus AddRequestHeader/sensitiveHeaders, duplicate copy | medium | patch | Fixed; both copies kept identical. |
 | Service compose Eureka tag 4.1.4 | low | patch | Pinned to 4.1.1 like root compose. |
-| No CacheErrorHandler (Redis outage = 500) | medium | defer | Beyond spec; adds surface. |
-| customerId not validated (>64 chars = 500) | medium | defer | Needs validation + handler. |
+| No CacheErrorHandler (Redis outage = 500) | medium | patch (promoted) | Fixed on user request; errors logged and swallowed. |
+| customerId not validated (>64 chars = 500) | medium | patch (promoted) | Fixed on user request; `@NotBlank @Size(max=64)` -> 400. |
 | Async audit rejection, profile 5xx/null, first-check race, reason >512 chars | low/medium | defer | Real edge cases, not spec-required. |
 | Unauthenticated service / demo toggle | n/a | reject | Spec states GET is unauthenticated for the pattern demo. |
 | Port 8083 in spec vs 8086 in code | n/a | reject | Fix would edit this build's spec. |
