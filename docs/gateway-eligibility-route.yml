@@ -3,34 +3,28 @@
 # application.yml when that service is built.
 #
 # Route: /eligibility/** → eligibility-api (Eureka lb://eligibility-api)
-# Filters propagate Authorization and X-Request-Id to the downstream service.
+# Authorization passes through unchanged; X-Request-Id needs the filter below.
 
 spring:
   cloud:
     gateway:
-      # Authorization is in the default sensitive-headers set; clear it so
-      # the token is forwarded. Hop-by-hop headers are still stripped.
-      default-filters:
-        - DedupeResponseHeader=Access-Control-Allow-Credentials Access-Control-Allow-Origin
+      # Authorization and Cookie are NOT stripped by Spring Cloud Gateway by
+      # default, so they reach the service as-is. X-Request-Id is generated
+      # by the custom filter below when the caller did not send one.
       routes:
         - id: eligibility-api
           uri: lb://eligibility-api
           predicates:
             - Path=/eligibility/**
           filters:
+            # Gateway path /eligibility/** -> service path /api/eligibility/**
+            - RewritePath=/eligibility/(?<segment>.*), /api/eligibility/$\{segment}
             - PreserveHostHeader
             - name: Retry
               args:
                 retries: 1
                 methods: GET
-            # Explicitly copy identity + correlation headers onto the outbound request.
-            - name: AddRequestHeader
-              args:
-                name: X-Request-Id
-                value: "{X-Request-Id}"
-          metadata:
-            # Empty sensitiveHeaders => do not strip Authorization / Cookie.
-            sensitiveHeaders: ""
+                statuses: BAD_GATEWAY, SERVICE_UNAVAILABLE
 
 # Equivalent custom filter (Java) if YAML header copy is not enough:
 #

@@ -44,7 +44,7 @@ class CreditBureauClientCircuitBreakerTest {
                 assertThat(report.available()).isFalse();
             }
             CircuitBreaker.State state = circuitBreakerRegistry.circuitBreaker("creditBureau").getState();
-            assertThat(state).isIn(CircuitBreaker.State.OPEN, CircuitBreaker.State.HALF_OPEN, CircuitBreaker.State.CLOSED);
+            assertThat(state).isEqualTo(CircuitBreaker.State.OPEN);
             CreditBureauReport after = creditBureauClient.getReport("cb-open-after");
             assertThat(after.available()).isFalse();
             assertThat(after.detail().toLowerCase()).contains("manual review required");

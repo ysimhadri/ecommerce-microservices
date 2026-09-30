@@ -4,7 +4,7 @@ import com.ecommerce.eligibility.dto.EligibilityResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -20,7 +20,7 @@ import java.util.Map;
 
 /**
  * Spring Cache + Redis: eligibility results keyed by customerId+productType
- * with a 10-minute TTL. Absent a {@link RedisConnectionFactory} (test/local
+ * with a 10-minute TTL. When {@code spring.cache.type} is not {@code redis} (test/local
  * simple-cache profiles) this bean is skipped and Spring Boot's configured
  * cache type takes over.
  */
@@ -29,7 +29,7 @@ import java.util.Map;
 public class CacheConfig {
 
     @Bean
-    @ConditionalOnBean(RedisConnectionFactory.class)
+    @ConditionalOnProperty(name = "spring.cache.type", havingValue = "redis")
     public RedisCacheManager cacheManager(
             RedisConnectionFactory connectionFactory,
             @Value("${app.cache.eligibility-ttl:10m}") Duration eligibilityTtl) {

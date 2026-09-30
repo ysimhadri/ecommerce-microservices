@@ -29,6 +29,7 @@ public class EligibilityInfrastructureHealthIndicator implements HealthIndicator
     @Override
     public Health health() {
         Health.Builder builder = Health.up();
+        boolean redisDown = false;
 
         RedisConnectionFactory redis = redisConnectionFactory.getIfAvailable();
         if (redis == null) {
@@ -38,6 +39,7 @@ public class EligibilityInfrastructureHealthIndicator implements HealthIndicator
                 connection.ping();
                 builder.withDetail("redis", "UP");
             } catch (RuntimeException ex) {
+                redisDown = true;
                 builder.down().withDetail("redis", "DOWN").withDetail("redisError", ex.getMessage());
             }
         }
@@ -46,7 +48,7 @@ public class EligibilityInfrastructureHealthIndicator implements HealthIndicator
         CircuitBreaker.State state = breaker.getState();
         builder.withDetail("creditBureauCircuitBreaker", state.name());
         builder.withDetail("creditBureauFailureRate", breaker.getMetrics().getFailureRate());
-        if (state == CircuitBreaker.State.OPEN) {
+        if (state == CircuitBreaker.State.OPEN && !redisDown) {
             builder.status("DEGRADED");
         }
 

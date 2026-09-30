@@ -68,6 +68,39 @@ class EligibilityControllerIntegrationTest extends AbstractIntegrationTest {
 
     @Test
     @SuppressWarnings("unchecked")
+    void lowScoreCustomer_isIneligibleWithThresholdReason() {
+        ResponseEntity<Map> response = restTemplate.getForEntity(
+                url("low-score-" + UUID.randomUUID(), "CREDIT_CARD"), Map.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody().get("status")).isEqualTo(EligibilityStatus.INELIGIBLE.name());
+        assertThat(String.valueOf(response.getBody().get("reason"))).contains("below threshold");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void unverifiedKycCustomer_isIneligible() {
+        ResponseEntity<Map> response = restTemplate.getForEntity(
+                url("unverified-" + UUID.randomUUID(), "CREDIT_CARD"), Map.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody().get("status")).isEqualTo(EligibilityStatus.INELIGIBLE.name());
+        assertThat(String.valueOf(response.getBody().get("reason"))).contains("KYC is not verified");
+    }
+
+    @Test
+    void repeatedCheck_isServedFromCacheWithoutNewDecisionRow() {
+        String customerId = "high-score-" + UUID.randomUUID();
+
+        restTemplate.getForEntity(url(customerId, "CREDIT_CARD"), Map.class);
+        restTemplate.getForEntity(url(customerId, "CREDIT_CARD"), Map.class);
+
+        assertThat(decisionRepository.findAll().stream()
+                .filter(d -> customerId.equals(d.getCustomerId())).count()).isEqualTo(1);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
     void circuitBreakerFallback_returnsManualReviewRequired() {
         String customerId = "force-fail-" + UUID.randomUUID();
 
