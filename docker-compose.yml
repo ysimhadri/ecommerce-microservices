@@ -145,6 +145,142 @@ services:
     networks:
       - ecommerce-net
 
+  cart-postgres:
+    image: postgres:16-alpine
+    container_name: cart-postgres
+    environment:
+      POSTGRES_DB: ${CART_DB_NAME:-cartdb}
+      POSTGRES_USER: ${CART_DB_USERNAME:-cartuser}
+      POSTGRES_PASSWORD: ${CART_DB_PASSWORD:-cartpass}
+    volumes:
+      - cart_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${CART_DB_USERNAME:-cartuser} -d ${CART_DB_NAME:-cartdb}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - ecommerce-net
+
+  cart-service:
+    build:
+      context: ./services/cart-service
+    container_name: cart-service
+    environment:
+      DB_HOST: cart-postgres
+      DB_PORT: 5432
+      DB_NAME: ${CART_DB_NAME:-cartdb}
+      DB_USERNAME: ${CART_DB_USERNAME:-cartuser}
+      DB_PASSWORD: ${CART_DB_PASSWORD:-cartpass}
+      # Must match auth-service's JWT_SECRET. This service only verifies user tokens locally.
+      JWT_SECRET: ${JWT_SECRET:-dev-only-change-me-auth-service-hs256-signing-secret-32bytes+}
+    ports:
+      - "8083:8080"
+    depends_on:
+      cart-postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- -T 3 http://localhost:8080/api/v1/carts/00000000-0000-0000-0000-000000000000 >/dev/null 2>&1; test $? -ne 4"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - ecommerce-net
+
+  inventory-postgres:
+    image: postgres:16-alpine
+    container_name: inventory-postgres
+    environment:
+      POSTGRES_DB: ${INVENTORY_DB_NAME:-inventorydb}
+      POSTGRES_USER: ${INVENTORY_DB_USERNAME:-inventoryuser}
+      POSTGRES_PASSWORD: ${INVENTORY_DB_PASSWORD:-inventorypass}
+    volumes:
+      - inventory_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${INVENTORY_DB_USERNAME:-inventoryuser} -d ${INVENTORY_DB_NAME:-inventorydb}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - ecommerce-net
+
+  inventory-service:
+    build:
+      context: ./services/inventory-service
+    container_name: inventory-service
+    environment:
+      DB_HOST: inventory-postgres
+      DB_PORT: 5432
+      DB_NAME: ${INVENTORY_DB_NAME:-inventorydb}
+      DB_USERNAME: ${INVENTORY_DB_USERNAME:-inventoryuser}
+      DB_PASSWORD: ${INVENTORY_DB_PASSWORD:-inventorypass}
+      JWT_SECRET: ${JWT_SECRET:-dev-only-change-me-auth-service-hs256-signing-secret-32bytes+}
+    ports:
+      - "8084:8080"
+    depends_on:
+      inventory-postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- -T 3 http://localhost:8080/api/v1/inventory/stock/00000000-0000-0000-0000-000000000000 >/dev/null 2>&1; test $? -ne 4"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - ecommerce-net
+
+  order-postgres:
+    image: postgres:16-alpine
+    container_name: order-postgres
+    environment:
+      POSTGRES_DB: ${ORDER_DB_NAME:-orderdb}
+      POSTGRES_USER: ${ORDER_DB_USERNAME:-orderuser}
+      POSTGRES_PASSWORD: ${ORDER_DB_PASSWORD:-orderpass}
+    volumes:
+      - order_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${ORDER_DB_USERNAME:-orderuser} -d ${ORDER_DB_NAME:-orderdb}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - ecommerce-net
+
+  order-service:
+    build:
+      context: ./services/order-service
+    container_name: order-service
+    environment:
+      DB_HOST: order-postgres
+      DB_PORT: 5432
+      DB_NAME: ${ORDER_DB_NAME:-orderdb}
+      DB_USERNAME: ${ORDER_DB_USERNAME:-orderuser}
+      DB_PASSWORD: ${ORDER_DB_PASSWORD:-orderpass}
+      JWT_SECRET: ${JWT_SECRET:-dev-only-change-me-auth-service-hs256-signing-secret-32bytes+}
+      CART_SERVICE_URL: http://cart-service:8080
+      INVENTORY_SERVICE_URL: http://inventory-service:8080
+      CATALOG_SERVICE_URL: http://product-catalog-service:8080
+    ports:
+      - "8085:8080"
+    depends_on:
+      order-postgres:
+        condition: service_healthy
+      cart-service:
+        condition: service_healthy
+      inventory-service:
+        condition: service_healthy
+      product-catalog-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- -T 3 http://localhost:8080/api/v1/orders/00000000-0000-0000-0000-000000000000 >/dev/null 2>&1; test $? -ne 4"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - ecommerce-net
+
   eligibility-redis:
     image: redis:7-alpine
     container_name: eligibility-redis
@@ -183,7 +319,7 @@ services:
       CREDIT_BUREAU_MODE: mock
       ELIGIBILITY_DB_PATH: /app/data/eligibility
     ports:
-      - "8083:8080"
+      - "8086:8080"
     depends_on:
       eligibility-redis:
         condition: service_healthy
@@ -202,6 +338,9 @@ volumes:
   postgres_data:
   catalog_postgres_data:
   portal_postgres_data:
+  cart_postgres_data:
+  inventory_postgres_data:
+  order_postgres_data:
 
 networks:
   ecommerce-net:
