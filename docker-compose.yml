@@ -145,6 +145,59 @@ services:
     networks:
       - ecommerce-net
 
+  eligibility-redis:
+    image: redis:7-alpine
+    container_name: eligibility-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - ecommerce-net
+
+  # Lightweight registry so eligibility-api can register and resolve
+  # customer-profile-service by name. Not a production Eureka cluster.
+  eligibility-eureka:
+    image: steeltoeoss/eureka-server:4.1.1
+    container_name: eligibility-eureka
+    ports:
+      - "8761:8761"
+    environment:
+      SERVER_PORT: 8761
+    networks:
+      - ecommerce-net
+
+  eligibility-api:
+    build:
+      context: ./services/eligibility-api
+    container_name: eligibility-api
+    environment:
+      REDIS_HOST: eligibility-redis
+      REDIS_PORT: 6379
+      EUREKA_URI: http://eligibility-eureka:8761/eureka
+      EUREKA_ENABLED: "true"
+      CUSTOMER_PROFILE_STUB: "true"
+      CREDIT_BUREAU_MODE: mock
+      ELIGIBILITY_DB_PATH: /app/data/eligibility
+    ports:
+      - "8083:8080"
+    depends_on:
+      eligibility-redis:
+        condition: service_healthy
+      eligibility-eureka:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- -T 3 http://localhost:8080/actuator/health >/dev/null 2>&1; test $? -ne 4"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+    networks:
+      - ecommerce-net
+
 volumes:
   postgres_data:
   catalog_postgres_data:
