@@ -41,20 +41,20 @@ Or from the repo root, with the other ecommerce services:
 docker compose up --build
 ```
 
-Host port is **8083** (container 8080).
+Host port is **8086** (container 8080).
 
 ## Curl
 
 ```bash
 # Eligible credit card (stub profile + mock bureau score 720 / 790 for high-score-*)
-curl -s "http://localhost:8083/api/eligibility/high-score-ada?productType=CREDIT_CARD" | jq
+curl -s "http://localhost:8086/api/eligibility/high-score-ada?productType=CREDIT_CARD" | jq
 
 # Ineligible (low mock score)
-curl -s "http://localhost:8083/api/eligibility/low-score-ada?productType=CREDIT_CARD" | jq
+curl -s "http://localhost:8086/api/eligibility/low-score-ada?productType=CREDIT_CARD" | jq
 
 # Actuator
-curl -s http://localhost:8083/actuator/health | jq
-curl -s http://localhost:8083/actuator/prometheus | head
+curl -s http://localhost:8086/actuator/health | jq
+curl -s http://localhost:8086/actuator/prometheus | head
 ```
 
 Product types: `CREDIT_CARD`, `PERSONAL_LOAN`, `MORTGAGE`.
@@ -67,13 +67,13 @@ fallback the engine maps to **manual review required** (HTTP 200, not 5xx).
 
 ```bash
 # One-shot fallback via customer id
-curl -s "http://localhost:8083/api/eligibility/force-fail-demo?productType=CREDIT_CARD" | jq
+curl -s "http://localhost:8086/api/eligibility/force-fail-demo?productType=CREDIT_CARD" | jq
 # -> status: MANUAL_REVIEW_REQUIRED, reason contains "manual review required"
 
 # Or flip the mock for every subsequent customer
-curl -s -X POST "http://localhost:8083/api/eligibility/demo/credit-bureau/fail?enabled=true" | jq
-curl -s "http://localhost:8083/api/eligibility/anyone?productType=CREDIT_CARD" | jq
-curl -s -X POST "http://localhost:8083/api/eligibility/demo/credit-bureau/fail?enabled=false" | jq
+curl -s -X POST "http://localhost:8086/api/eligibility/demo/credit-bureau/fail?enabled=true" | jq
+curl -s "http://localhost:8086/api/eligibility/anyone?productType=CREDIT_CARD" | jq
+curl -s -X POST "http://localhost:8086/api/eligibility/demo/credit-bureau/fail?enabled=false" | jq
 ```
 
 Manual-review results are **not** cached, so turning the bureau back on is
@@ -87,7 +87,7 @@ immediately). Burst past it:
 ```bash
 for i in $(seq 1 80); do
   curl -s -o /dev/null -w "%{http_code}\n" \
-    "http://localhost:8083/api/eligibility/burst-$i?productType=CREDIT_CARD" &
+    "http://localhost:8086/api/eligibility/burst-$i?productType=CREDIT_CARD" &
 done
 wait
 # expect a mix of 200 and 429
