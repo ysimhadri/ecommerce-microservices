@@ -65,10 +65,10 @@ Do not change cart, inventory, catalog, auth, or eligibility behavior.
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `services/payment-service/**` -- Boot module with authorize, replay, conflict, decline, outage, void, user-JWT filter, Flyway, Dockerfile, `application.yml`, and README. Test the charge rules, including success, replay, and outage with no row -- ledger the saga can call.
-- [ ] `services/order-service/**` -- `RestPaymentClient` (`@CircuitBreaker`) behind `PaymentGateway`. Forward `simulatePaymentFailure` as `simulateDecline`. Drop the local payment table. Tests: decline still compensates without void; outage compensates without void; repeated 5xx opens the breaker and the next call is `PAYMENT_UNAVAILABLE` -- transport changes, step order does not.
-- [ ] `docker-compose.yml` -- `payment-postgres` and `payment-service` on 8087; order-service gets `PAYMENT_SERVICE_URL=http://payment-service:8080` and depends on payment health -- compose can place an order.
-- [ ] `README.md`, `services/order-service/README.md`, `docs/architecture.md`, `_bmad-output/implementation-artifacts/deferred-work.md` -- document the HTTP step, breaker, and port 8087; mark this deferred item done only -- backlog matches what shipped.
+- [x] `services/payment-service/**` -- Boot module with authorize, replay, conflict, decline, outage, void, user-JWT filter, Flyway, Dockerfile, `application.yml`, and README. Test the charge rules, including success, replay, and outage with no row -- ledger the saga can call.
+- [x] `services/order-service/**` -- `RestPaymentClient` (`@CircuitBreaker`) behind `PaymentGateway`. Forward `simulatePaymentFailure` as `simulateDecline`. Drop the local payment table. Tests: decline still compensates without void; outage compensates without void; repeated 5xx opens the breaker and the next call is `PAYMENT_UNAVAILABLE` -- transport changes, step order does not.
+- [x] `docker-compose.yml` -- `payment-postgres` and `payment-service` on 8087; order-service gets `PAYMENT_SERVICE_URL=http://payment-service:8080` and depends on payment health -- compose can place an order.
+- [x] `README.md`, `services/order-service/README.md`, `docs/architecture.md`, `_bmad-output/implementation-artifacts/deferred-work.md` -- document the HTTP step, breaker, and port 8087; mark this deferred item done only -- backlog matches what shipped.
 
 **Acceptance Criteria:**
 - Given a user JWT and a new order id, when authorize is retried with the same amount, then both calls return the same payment id and one `AUTHORIZED` row exists.
@@ -77,6 +77,10 @@ Do not change cart, inventory, catalog, auth, or eligibility behavior.
 - Given `mvn test` in `services/payment-service` and `services/order-service`, when Docker is available, then both suites exit 0.
 
 ## Implementation Notes
+
+- `payment-service` ledger is idempotent on `orderId`. Currency is normalized to three uppercase letters. A unique-constraint race replays the stored row in a new transaction.
+- Order charges are sent as `USD`. `simulatePaymentFailure` is forwarded as `simulateDecline`. The breaker name is `payment`.
+- `mvn test` in `services/payment-service`: 14 tests, 0 failures. `mvn test` in `services/order-service`: 37 tests, 0 failures, including decline compensation, 503 compensation, an open circuit that does not call payment, and a void that throws while unlock and cancel still run.
 
 ## Spec Change Log
 

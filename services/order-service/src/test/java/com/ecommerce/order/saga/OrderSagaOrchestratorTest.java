@@ -240,6 +240,25 @@ class OrderSagaOrchestratorTest {
     }
 
     @Test
+    void voidFailureDuringCompensation_stillUnlocksAndCancels() {
+        stubPricedCart();
+        when(inventoryClient.reserve(eq(orderId), any(), eq(TOKEN)))
+                .thenReturn(new ReservationSnapshot(reservationId, orderId, "HELD"));
+        doThrow(new IllegalStateException("clear failed")).when(cartClient).clear(cartId, TOKEN);
+        doThrow(new IllegalStateException("void failed"))
+                .when(paymentGateway).voidAuthorization(orderId, TOKEN);
+
+        assertThatThrownBy(() -> orchestrator.place(userId, TOKEN, cartId, false))
+                .isInstanceOf(CompensatedOrderException.class)
+                .satisfies(ex -> assertThat(((CompensatedOrderException) ex).getCode()).isEqualTo("SAGA_FAILED"));
+
+        verify(paymentGateway).voidAuthorization(orderId, TOKEN);
+        verify(cartClient).unlock(cartId, TOKEN);
+        verify(orderCommandService).cancel(orderId, "SAGA_FAILED");
+        verify(inventoryClient, never()).release(any(), any());
+    }
+
+    @Test
     void unknownProduct_doesNotCreateAnOrder() {
         when(cartClient.getCart(cartId, TOKEN)).thenReturn(activeCart());
         when(catalogClient.getProduct(productId)).thenThrow(new ProductNotFoundException("Product not found"));
