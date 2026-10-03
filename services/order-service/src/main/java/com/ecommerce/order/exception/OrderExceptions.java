@@ -49,6 +49,17 @@ public final class OrderExceptions {
         }
     }
 
+    /** Payment HTTP 5xx, timeout, connection failure, or an open circuit. */
+    public static class PaymentUnavailableException extends RuntimeException {
+        public PaymentUnavailableException(String message) {
+            super(message);
+        }
+
+        public PaymentUnavailableException(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
+
     public static class OrderNotFoundException extends RuntimeException {
         public OrderNotFoundException(String message) {
             super(message);

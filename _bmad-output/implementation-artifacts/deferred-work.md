@@ -26,11 +26,12 @@
   evidence: Catalog still has no stock. Hold, release, commit, and revert live in `services/inventory-service`. This is not a broader inventory product.
   status: Built in `services/inventory-service`.
 
-## Still deferred
+- source_spec: `_bmad-output/implementation-artifacts/spec-payment-service.md`
+  summary: Payment Service — idempotent charges the order saga calls over HTTP, with a circuit breaker on the order-service client.
+  evidence: `payment-service` owns `paymentdb` and authorizes on `orderId`. `order-service` calls it with `RestPaymentClient` (`@CircuitBreaker` name `payment`). `simulatePaymentFailure` is forwarded as `simulateDecline`. Decline and outage compensate with release then unlock and do not void.
+  status: Built in `services/payment-service`.
 
-- source_spec: none
-  summary: Payment Service — a real payment provider, with idempotency and circuit-breaker patterns.
-  evidence: Split from the original "microservices ecommerce platform" intent. `order-service` only has `MockPaymentGateway` (`simulatePaymentFailure`). No capture, no provider, no circuit breaker.
+## Still deferred
 
 - source_spec: none
   summary: Notification Service — order/payment event notifications demonstrating pub/sub, event-driven architecture.
@@ -62,3 +63,9 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-eligibility-api.md`
   summary: Input and dependency hardening (customerId validation now done; remaining): audit executor rejection, customer-profile 5xx/null handling, concurrent first-check race, reason truncation.
   evidence: Each currently surfaces as a generic 500 (customerId > 64 chars overflows VARCHAR(64)).
+
+## Deferred from: code review of spec-payment-service (2026-10-03)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-payment-service.md`
+  summary: Two overlapping authorizes of a new orderId are not tested.
+  evidence: `PaymentService` catches `DataIntegrityViolationException` and replays the stored row. Sequential replay is covered. A lost insert race is not, so that path could still return 500.

@@ -32,6 +32,12 @@ public class ClientConfig {
         return client(builder, baseUrl);
     }
 
+    @Bean
+    public RestClient paymentRestClient(RestClient.Builder builder,
+                                         @Value("${app.clients.payment-base-url}") String baseUrl) {
+        return client(builder, baseUrl);
+    }
+
     private static RestClient client(RestClient.Builder builder, String baseUrl) {
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(TIMEOUT);

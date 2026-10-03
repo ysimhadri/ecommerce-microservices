@@ -24,12 +24,32 @@ spring:
 app:
   jwt:
     # Same HS256 secret auth-service signs with. This service only verifies
-    # the caller and forwards that bearer token to cart and inventory.
+    # the caller and forwards that bearer token to cart, inventory, and payment.
     secret: ${JWT_SECRET:dev-only-change-me-auth-service-hs256-signing-secret-32bytes+}
   clients:
     cart-base-url: ${CART_SERVICE_URL:http://localhost:8083}
     inventory-base-url: ${INVENTORY_SERVICE_URL:http://localhost:8084}
     catalog-base-url: ${CATALOG_SERVICE_URL:http://localhost:8081}
+    payment-base-url: ${PAYMENT_SERVICE_URL:http://localhost:8087}
+
+# Breaker on the outbound payment client only. Declines are ignored so they
+# cannot open the circuit. Outages are recorded. An open circuit fails the
+# call immediately as PAYMENT_UNAVAILABLE.
+resilience4j:
+  circuitbreaker:
+    instances:
+      payment:
+        slidingWindowSize: 10
+        minimumNumberOfCalls: 5
+        failureRateThreshold: 50
+        waitDurationInOpenState: 10s
+        permittedNumberOfCallsInHalfOpenState: 2
+        automaticTransitionFromOpenToHalfOpenEnabled: true
+        recordExceptions:
+          - com.ecommerce.order.exception.OrderExceptions$PaymentUnavailableException
+          - org.springframework.web.client.RestClientException
+        ignoreExceptions:
+          - com.ecommerce.order.exception.OrderExceptions$PaymentDeclinedException
 
 logging:
   level:

@@ -230,6 +230,48 @@ services:
     networks:
       - ecommerce-net
 
+  payment-postgres:
+    image: postgres:16-alpine
+    container_name: payment-postgres
+    environment:
+      POSTGRES_DB: ${PAYMENT_DB_NAME:-paymentdb}
+      POSTGRES_USER: ${PAYMENT_DB_USERNAME:-paymentuser}
+      POSTGRES_PASSWORD: ${PAYMENT_DB_PASSWORD:-paymentpass}
+    volumes:
+      - payment_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PAYMENT_DB_USERNAME:-paymentuser} -d ${PAYMENT_DB_NAME:-paymentdb}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - ecommerce-net
+
+  payment-service:
+    build:
+      context: ./services/payment-service
+    container_name: payment-service
+    environment:
+      DB_HOST: payment-postgres
+      DB_PORT: 5432
+      DB_NAME: ${PAYMENT_DB_NAME:-paymentdb}
+      DB_USERNAME: ${PAYMENT_DB_USERNAME:-paymentuser}
+      DB_PASSWORD: ${PAYMENT_DB_PASSWORD:-paymentpass}
+      JWT_SECRET: ${JWT_SECRET:-dev-only-change-me-auth-service-hs256-signing-secret-32bytes+}
+    ports:
+      - "8087:8080"
+    depends_on:
+      payment-postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- -T 3 http://localhost:8080/api/v1/payments/authorizations >/dev/null 2>&1; test $? -ne 4"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - ecommerce-net
+
   order-postgres:
     image: postgres:16-alpine
     container_name: order-postgres
@@ -261,6 +303,7 @@ services:
       CART_SERVICE_URL: http://cart-service:8080
       INVENTORY_SERVICE_URL: http://inventory-service:8080
       CATALOG_SERVICE_URL: http://product-catalog-service:8080
+      PAYMENT_SERVICE_URL: http://payment-service:8080
     ports:
       - "8085:8080"
     depends_on:
@@ -271,6 +314,8 @@ services:
       inventory-service:
         condition: service_healthy
       product-catalog-service:
+        condition: service_healthy
+      payment-service:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- -T 3 http://localhost:8080/api/v1/orders/00000000-0000-0000-0000-000000000000 >/dev/null 2>&1; test $? -ne 4"]
@@ -341,6 +386,7 @@ volumes:
   cart_postgres_data:
   inventory_postgres_data:
   order_postgres_data:
+  payment_postgres_data:
 
 networks:
   ecommerce-net:

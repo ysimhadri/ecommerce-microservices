@@ -1,4 +1,4 @@
-package com.ecommerce.order.model;
+package com.ecommerce.payment.model;
 
 public enum PaymentStatus {
     AUTHORIZED,

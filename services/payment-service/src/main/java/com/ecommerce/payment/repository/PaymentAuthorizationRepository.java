@@ -1,6 +1,6 @@
-package com.ecommerce.order.repository;
+package com.ecommerce.payment.repository;
 
-import com.ecommerce.order.model.PaymentAuthorization;
+import com.ecommerce.payment.model.PaymentAuthorization;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.Optional;
