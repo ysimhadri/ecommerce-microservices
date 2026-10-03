@@ -2,7 +2,7 @@
 title: 'Payment Service — idempotent charges the order saga calls over HTTP'
 type: 'feature'
 created: '2026-10-03'
-status: 'in-review'
+status: 'done'
 route: 'dispatch'
 review_loop_iteration: 0
 context: ['{project-root}/_bmad-output/implementation-artifacts/deferred-work.md', '{project-root}/docs/architecture.md']
