@@ -145,10 +145,57 @@ services:
     networks:
       - ecommerce-net
 
+  cart-postgres:
+    image: postgres:16-alpine
+    container_name: cart-postgres
+    environment:
+      POSTGRES_DB: ${CART_DB_NAME:-cartdb}
+      POSTGRES_USER: ${CART_DB_USERNAME:-cartuser}
+      POSTGRES_PASSWORD: ${CART_DB_PASSWORD:-cartpass}
+    volumes:
+      - cart_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${CART_DB_USERNAME:-cartuser} -d ${CART_DB_NAME:-cartdb}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - ecommerce-net
+
+  cart-service:
+    build:
+      context: ./services/cart-service
+    container_name: cart-service
+    environment:
+      DB_HOST: cart-postgres
+      DB_PORT: 5432
+      DB_NAME: ${CART_DB_NAME:-cartdb}
+      DB_USERNAME: ${CART_DB_USERNAME:-cartuser}
+      DB_PASSWORD: ${CART_DB_PASSWORD:-cartpass}
+      # Same secret auth-service signs with; tokens are validated locally.
+      JWT_SECRET: ${JWT_SECRET:-dev-only-change-me-auth-service-hs256-signing-secret-32bytes+}
+      CATALOG_SERVICE_URL: ${CATALOG_SERVICE_URL:-http://product-catalog-service:8080}
+    ports:
+      - "8083:8080"
+    depends_on:
+      cart-postgres:
+        condition: service_healthy
+    healthcheck:
+      # Every route requires auth, so a 401 still proves Spring Boot is up;
+      # wget exit code 4 (cannot connect) is the only failure case.
+      test: ["CMD-SHELL", "wget -qO- -T 3 http://localhost:8080/api/v1/cart >/dev/null 2>&1; test $? -ne 4"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - ecommerce-net
+
 volumes:
   postgres_data:
   catalog_postgres_data:
   portal_postgres_data:
+  cart_postgres_data:
 
 networks:
   ecommerce-net:

@@ -48,3 +48,13 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-api-portal-service.md`
   summary: JWT secret rotation has no kid/dual-key support for a graceful rotation window.
   evidence: PORTAL_JWT_SECRET must be updated identically and simultaneously across api-portal-service and every producer service today; a real operational gap, but adding key-id-based dual-key support is an architectural enhancement beyond a patch-sized fix.
+
+## Deferred from: code review of spec-cart-service (2026-10-03)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-cart-service.md`
+  summary: Catch-all `@ExceptionHandler(Exception.class)` maps unknown routes, wrong verbs and bad content types to 500 instead of 404/405/415 in all four services.
+  evidence: Same handler shape in auth, catalog, portal and cart services; fixing it is a cross-service change, not a cart-only patch.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-cart-service.md`
+  summary: Compose healthchecks use unescaped `$?` and `test $? -ne 4`, which may not detect a down service under busybox wget.
+  evidence: Identical line in all four services' compose entries; unverified whether it actually misbehaves - settle by stopping a service container and watching its health status.

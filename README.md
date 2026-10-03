@@ -165,6 +165,42 @@ comments too):
 | Layered architecture        | Controller → Service (registry/grant/token) → Repository, each single-responsibility |
 | Centralized error handling  | `GlobalExceptionHandler` (`@ControllerAdvice`) maps domain exceptions (unknown audience, missing grant, scope not granted, ...) to HTTP responses in one place |
 
+### cart-service
+
+Shopping cart state management. Every cart belongs to an authenticated
+`auth-service` user: the Bearer token is validated locally with
+`auth-service`'s shared `JWT_SECRET` (no network call) and the caller is the
+token's `sub`. Adding an item calls `product-catalog-service`'s public
+`GET /api/v1/catalog/products/{id}` (`CATALOG_SERVICE_URL`) to confirm the
+product exists and snapshot its name/price. See
+[`services/cart-service`](services/cart-service). Host port `8083`.
+
+Stack: Java 21, Spring Boot 3.3.x, PostgreSQL (own database, `cartdb`),
+Flyway, JWT (validation only), blocking `WebClient`.
+
+**API** (`/api/v1/cart`, all require a Bearer token; no cart id in any URL):
+
+| Method | Path              | Purpose                                                        |
+|--------|-------------------|----------------------------------------------------------------|
+| POST   | `/`               | Get-or-create the caller's `ACTIVE` cart (always 200, converges under races) |
+| POST   | `/items`          | Add an item; an already-present product has its quantity increased |
+| PATCH  | `/items/{itemId}` | Update an item's quantity                                       |
+| DELETE | `/items/{itemId}` | Remove an item                                                  |
+| DELETE | `/`               | Clear the cart (stays `ACTIVE`)                                 |
+| POST   | `/checkout`       | `ACTIVE` -> `CHECKED_OUT` (400 `CART_EMPTY` if no items)         |
+
+Mutations on a `CHECKED_OUT` cart return `409 CART_NOT_ACTIVE`. At most one
+`ACTIVE` cart per user is enforced by a partial unique index.
+
+| Pattern                    | Where |
+|-----------------------------|-------|
+| State                       | `model/state/CartState` with `ActiveState` / `CheckedOutState` guard mutations and own the checkout transition |
+| Chain of Responsibility     | `security/JwtAuthFilter` validates `auth-service` tokens before any controller |
+| Repository                  | `CartRepository` / `CartItemRepository` |
+| DTO                         | `dto/*` keep entities out of the API |
+| Layered architecture        | Controller -> Service -> Repository |
+| Centralized error handling  | `GlobalExceptionHandler` maps domain exceptions to `ErrorResponse` |
+
 ### Service-to-service (S2S) auth flow
 
 The end-to-end shape every future producer service will follow to protect
