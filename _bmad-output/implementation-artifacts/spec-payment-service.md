@@ -2,7 +2,7 @@
 title: 'Payment Service — idempotent charges the order saga calls over HTTP'
 type: 'feature'
 created: '2026-10-03'
-status: 'in-progress'
+status: 'in-review'
 route: 'dispatch'
 review_loop_iteration: 0
 context: ['{project-root}/_bmad-output/implementation-artifacts/deferred-work.md', '{project-root}/docs/architecture.md']
@@ -80,11 +80,35 @@ Do not change cart, inventory, catalog, auth, or eligibility behavior.
 
 - `payment-service` ledger is idempotent on `orderId`. Currency is normalized to three uppercase letters. A unique-constraint race replays the stored row in a new transaction.
 - Order charges are sent as `USD`. `simulatePaymentFailure` is forwarded as `simulateDecline`. The breaker name is `payment`.
-- `mvn test` in `services/payment-service`: 14 tests, 0 failures. `mvn test` in `services/order-service`: 37 tests, 0 failures, including decline compensation, 503 compensation, an open circuit that does not call payment, and a void that throws while unlock and cancel still run.
+- `mvn test` in `services/payment-service`: 15 tests, 0 failures. `mvn test` in `services/order-service`: 39 tests, 0 failures, including decline compensation, 503 compensation, an open circuit that does not call payment, a void after commit failure, a read timeout through the payment client bean, and a void that throws while unlock and cancel still run.
+- The payment image installs GNU wget so the compose healthcheck's exit 4 means the port is closed. BusyBox wget exits 1 for that case and for HTTP 401.
 
 ## Spec Change Log
 
 ## Review Triage Log
+
+- BH1 shared `payment` breaker fails void — `false` — a failed void is the matrix row "if void throws, compensation continues". Authorize outages never reach void because that step did not complete.
+- BH2 timeout after a committed charge leaves `AUTHORIZED` — `false` — the frozen rules treat timeout as an outage that does not void, and crash recovery is out of scope.
+- BH3 a 200 `VOIDED` replay is treated as a new authorize — `false` — `CustomerOrder` assigns a new id before authorize, so place-order cannot replay a voided charge.
+- BH4 other 4xx become `SAGA_FAILED` and do not open the breaker — `false` — only declines and outages have their own codes; `recordExceptions` lists outages, not client errors.
+- BH5 decline is logged as a fallback — `low` — rejected. The saga log already names `PAYMENT_DECLINED` versus `PAYMENT_UNAVAILABLE`. Filtering that warn adds a branch.
+- BH6 half-up rounding and no digit cap — `low` — rejected. Scale 2 is the stored charge. A 10-digit guard is extra, and catalog totals fit `NUMERIC(12, 2)`.
+- BH7 every integrity error is treated as an insert race — `low` — rejected for the overflow path (same guard as BH6). The missing concurrent test is the deferred entry below.
+- BH8 a zero catalog price becomes `SAGA_FAILED` — `low` — rejected. Catalog allows `price >= 0`, and payment correctly rejects a non-positive amount. A free-checkout path is new behavior.
+- BH9 BusyBox wget makes the healthcheck pass when nothing is listening — `medium` — `wget` in `eclipse-temurin:21-jre-alpine` exits 1 for both connection refusal and HTTP 401, so `test $? -ne 4` is success either way. Patch: install GNU wget.
+- BH10 dropping `orderdb.payment_authorizations` loses old rows — `false` — the spec requires that drop. Those rows were the in-process mock, not a provider ledger.
+- BH11 authorize can answer from a stale `AUTHORIZED` entity after a concurrent void — `low` — rejected. One place-order uses one new id and does not void and authorize at the same time. A version column is new state.
+- BH12 root README says every replay is `AUTHORIZED` — `low` — a stored `VOIDED` row is replayed as `VOIDED`. Patch the sentence.
+- BH13 place-order and payment tests miss amount, bearer, void, invalid token, and timeout — `medium` — same gaps as the verification-gap rows below.
+- EC1 amount above `NUMERIC(12, 2)` returns 500 — `low` — rejected. Same as BH6.
+- EC2 a JWT with no `sub` becomes 500 — `low` — rejected. auth-service always sets `sub`. A null check is an extra guard.
+- EC3 read timeout leaves an authorized charge — `false` — same as BH2.
+- EC4 an open circuit skips void — `false` — same as BH1.
+- VG1 place-order does not pin the charge amount or bearer — `medium` — the happy-path stub ignores both, so a wrong amount or a dropped token still returns 201. Patch the assertions.
+- VG2 void after a later step failure never hits the payment stub — `medium` — saga tests mock `PaymentGateway`. A no-op HTTP void would still pass. Patch a place-order test that counts one void.
+- VG3 a non-empty invalid bearer is never rejected — `medium` — only a missing header is tested. Patch a garbage bearer expecting 401 and no row.
+- VG4 the 3s payment client timeout is not what the outage tests run — `medium` — connection-refused uses a hand-built client. Patch a call through the `paymentRestClient` bean to a socket that accepts and does not answer.
+- VG5 overlapping inserts of one `orderId` are not tested — `defer` — sequential replay is tested. A real overlapping insert is its own race; recorded in deferred-work.
 
 ## Design Notes
 

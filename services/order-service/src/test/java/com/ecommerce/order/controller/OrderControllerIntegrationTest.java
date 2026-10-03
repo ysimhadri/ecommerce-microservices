@@ -194,6 +194,7 @@ class OrderControllerIntegrationTest {
         assertThat(PAYMENT.storedOrderIds()).isEmpty();
         assertThat(PAYMENT.voids()).isZero();
         assertThat(PAYMENT.lastAuthorize().path("simulateDecline").asBoolean()).isTrue();
+        assertThat(PAYMENT.lastAuthorize().path("amount").decimalValue()).isEqualByComparingTo("19.98");
         assertThat(PAYMENT.lastAuthorization()).isEqualTo("Bearer " + jwt);
         verify(inventoryClient).release(eq(reservationId), anyString());
         verify(cartClient).unlock(eq(cartId), anyString());

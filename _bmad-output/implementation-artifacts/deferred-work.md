@@ -63,3 +63,9 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-eligibility-api.md`
   summary: Input and dependency hardening (customerId validation now done; remaining): audit executor rejection, customer-profile 5xx/null handling, concurrent first-check race, reason truncation.
   evidence: Each currently surfaces as a generic 500 (customerId > 64 chars overflows VARCHAR(64)).
+
+## Deferred from: code review of spec-payment-service (2026-10-03)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-payment-service.md`
+  summary: Two overlapping authorizes of a new orderId are not tested.
+  evidence: `PaymentService` catches `DataIntegrityViolationException` and replays the stored row. Sequential replay is covered. A lost insert race is not, so that path could still return 500.
