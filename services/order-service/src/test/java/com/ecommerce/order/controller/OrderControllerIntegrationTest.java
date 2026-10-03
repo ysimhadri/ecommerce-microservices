@@ -62,6 +62,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -124,8 +125,10 @@ class OrderControllerIntegrationTest {
         when(catalogClient.getProduct(productId)).thenReturn(new CatalogProductSnapshot(productId, "Headphones", new BigDecimal("9.99")));
         when(inventoryClient.reserve(any(), any(), anyString()))
                 .thenReturn(new ReservationSnapshot(reservationId, UUID.randomUUID(), "HELD"));
+        String jwt = token(userId);
 
-        ResponseEntity<OrderResponse> response = post(userId, Map.of("cartId", cartId.toString()), OrderResponse.class);
+        ResponseEntity<OrderResponse> response = exchange(
+                "/api/v1/orders", HttpMethod.POST, Map.of("cartId", cartId.toString()), OrderResponse.class, jwt);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
         OrderResponse body = response.getBody();
@@ -143,6 +146,8 @@ class OrderControllerIntegrationTest {
         assertThat(PAYMENT.voids()).isZero();
         assertThat(PAYMENT.lastAuthorize().path("simulateDecline").asBoolean()).isFalse();
         assertThat(PAYMENT.lastAuthorize().path("currency").asText()).isEqualTo("USD");
+        assertThat(PAYMENT.lastAuthorize().path("amount").decimalValue()).isEqualByComparingTo("19.98");
+        assertThat(PAYMENT.lastAuthorization()).isEqualTo("Bearer " + jwt);
         verify(cartClient).lock(eq(cartId), anyString());
         verify(inventoryClient).commit(eq(reservationId), anyString());
         verify(cartClient).clear(eq(cartId), anyString());
@@ -170,10 +175,11 @@ class OrderControllerIntegrationTest {
         when(catalogClient.getProduct(productId)).thenReturn(new CatalogProductSnapshot(productId, "Headphones", new BigDecimal("9.99")));
         when(inventoryClient.reserve(any(), any(), anyString()))
                 .thenReturn(new ReservationSnapshot(reservationId, UUID.randomUUID(), "HELD"));
+        String jwt = token(userId);
 
-        ResponseEntity<Map> response = post(userId, Map.of(
+        ResponseEntity<Map> response = exchange("/api/v1/orders", HttpMethod.POST, Map.of(
                 "cartId", cartId.toString(),
-                "simulatePaymentFailure", true), Map.class);
+                "simulatePaymentFailure", true), Map.class, jwt);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
         assertThat(response.getBody().get("status")).isEqualTo("CANCELLED");
@@ -188,6 +194,7 @@ class OrderControllerIntegrationTest {
         assertThat(PAYMENT.storedOrderIds()).isEmpty();
         assertThat(PAYMENT.voids()).isZero();
         assertThat(PAYMENT.lastAuthorize().path("simulateDecline").asBoolean()).isTrue();
+        assertThat(PAYMENT.lastAuthorization()).isEqualTo("Bearer " + jwt);
         verify(inventoryClient).release(eq(reservationId), anyString());
         verify(cartClient).unlock(eq(cartId), anyString());
         verify(inventoryClient, never()).commit(any(), anyString());
@@ -222,6 +229,30 @@ class OrderControllerIntegrationTest {
         verify(cartClient).unlock(eq(cartId), anyString());
         verify(inventoryClient, never()).commit(any(), anyString());
         verify(cartClient, never()).clear(any(), anyString());
+    }
+
+    @Test
+    void place_failureAfterAuthorize_voidsAndCancelsWithSagaFailed() {
+        UUID userId = UUID.randomUUID();
+        UUID cartId = UUID.randomUUID();
+        UUID productId = UUID.randomUUID();
+        UUID reservationId = UUID.randomUUID();
+        stubCart(cartId, userId, productId);
+        when(catalogClient.getProduct(productId)).thenReturn(new CatalogProductSnapshot(productId, "Headphones", new BigDecimal("9.99")));
+        when(inventoryClient.reserve(any(), any(), anyString()))
+                .thenReturn(new ReservationSnapshot(reservationId, UUID.randomUUID(), "HELD"));
+        doThrow(new IllegalStateException("commit failed")).when(inventoryClient).commit(eq(reservationId), anyString());
+
+        ResponseEntity<Map> response = post(userId, Map.of("cartId", cartId.toString()), Map.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(response.getBody().get("status")).isEqualTo("CANCELLED");
+        assertThat(response.getBody().get("code")).isEqualTo("SAGA_FAILED");
+        UUID orderId = UUID.fromString(response.getBody().get("orderId").toString());
+        CustomerOrder stored = orderRepository.findById(orderId).orElseThrow();
+        assertThat(stored.getStatus()).isEqualTo(OrderStatus.CANCELLED);
+        assertThat(stored.getFailureCode()).isEqualTo("SAGA_FAILED");
+        assertThat(PAYMENT.voids()).isEqualTo(1);
     }
 
     @Test
@@ -348,6 +379,7 @@ class OrderControllerIntegrationTest {
         private final AtomicInteger voids = new AtomicInteger();
         private final CopyOnWriteArrayList<String> storedOrderIds = new CopyOnWriteArrayList<>();
         private final AtomicReference<JsonNode> lastAuthorize = new AtomicReference<>();
+        private final AtomicReference<String> lastAuthorization = new AtomicReference<>();
 
         PaymentStub() throws IOException {
             server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -364,6 +396,7 @@ class OrderControllerIntegrationTest {
             voids.set(0);
             storedOrderIds.clear();
             lastAuthorize.set(null);
+            lastAuthorization.set(null);
         }
 
         void mode(Mode next) {
@@ -382,8 +415,13 @@ class OrderControllerIntegrationTest {
             return lastAuthorize.get();
         }
 
+        String lastAuthorization() {
+            return lastAuthorization.get();
+        }
+
         private void handle(HttpExchange exchange) throws IOException {
             try {
+                lastAuthorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
                 String path = exchange.getRequestURI().getPath();
                 if ("POST".equals(exchange.getRequestMethod()) && path.endsWith("/void")) {
                     voids.incrementAndGet();

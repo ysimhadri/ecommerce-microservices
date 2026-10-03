@@ -223,7 +223,7 @@ the auth-service user JWT (`JWT_SECRET`, `sub` = user id).
 | POST | `/api/v1/payments/authorizations` | Authorize `{orderId, amount, currency, simulateDecline?, simulateOutage?}`. 201 new, 200 replay. |
 | POST | `/api/v1/payments/authorizations/{orderId}/void` | Void. Missing row is an empty 200 and inserts nothing. |
 
-The same user, order, amount, and currency replays one `AUTHORIZED` row. A different amount or currency is 409 `PAYMENT_CONFLICT`. A stored `AUTHORIZED` or `VOIDED` row wins over a later `simulateDecline`. Decline and outage store nothing when no row exists.
+The same user, order, amount, and currency replays that row (`AUTHORIZED` stays `AUTHORIZED`; a stored `VOIDED` row is replayed as `VOIDED`). A different amount or currency is 409 `PAYMENT_CONFLICT`. A stored `AUTHORIZED` or `VOIDED` row wins over a later `simulateDecline`. Decline and outage store nothing when no row exists.
 
 ### order-service
 

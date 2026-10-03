@@ -13,7 +13,9 @@ RUN mvn -B -q clean package -DskipTests
 FROM eclipse-temurin:21-jre-alpine AS runtime
 WORKDIR /app
 
-RUN addgroup -S app && adduser -S app -G app
+# GNU wget, not BusyBox: connection failure is exit 4, while HTTP 401 is not.
+RUN apk add --no-cache wget \
+ && addgroup -S app && adduser -S app -G app
 COPY --from=build /build/target/*.jar app.jar
 USER app
 

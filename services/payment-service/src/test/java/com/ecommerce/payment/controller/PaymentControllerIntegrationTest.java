@@ -235,6 +235,20 @@ class PaymentControllerIntegrationTest {
     }
 
     @Test
+    void authorize_bearerThatIsNotAValidToken_returns401AndStoresNothing() {
+        ResponseEntity<Map> response = exchange(
+                "/api/v1/payments/authorizations",
+                HttpMethod.POST,
+                "{\"orderId\":\"" + UUID.randomUUID() + "\",\"amount\":10.50,\"currency\":\"USD\"}",
+                Map.class,
+                "not-a-valid-hs256-token");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(response.getBody().get("code")).isEqualTo("UNAUTHORIZED");
+        assertThat(paymentAuthorizationRepository.count()).isZero();
+    }
+
+    @Test
     void void_authorizedBecomesVoided_andSecondVoidStaysVoided() {
         UUID userId = UUID.randomUUID();
         UUID orderId = UUID.randomUUID();
