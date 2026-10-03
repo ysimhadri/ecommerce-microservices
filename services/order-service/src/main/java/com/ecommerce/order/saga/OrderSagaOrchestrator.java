@@ -15,6 +15,7 @@ import com.ecommerce.order.exception.OrderExceptions.CartNotActiveException;
 import com.ecommerce.order.exception.OrderExceptions.CompensatedOrderException;
 import com.ecommerce.order.exception.OrderExceptions.InsufficientStockException;
 import com.ecommerce.order.exception.OrderExceptions.PaymentDeclinedException;
+import com.ecommerce.order.exception.OrderExceptions.PaymentUnavailableException;
 import com.ecommerce.order.payment.PaymentGateway;
 import com.ecommerce.order.service.OrderCommandService;
 import com.ecommerce.order.service.PricedLine;
@@ -35,11 +36,11 @@ import java.util.UUID;
  * order is local and is finished by setting {@code CANCELLED}, not by a remote call.
  *
  * <p>Forward: load cart, price from catalog, insert {@code PENDING}, lock,
- * reserve, authorize, commit, clear, confirm. A declined payment did not
- * complete authorize, so compensation is release then unlock. Insufficient
- * stock fails at reserve, so only unlock runs. Void runs only after authorize
- * succeeded and a later step failed. Commit replaces the hold, so a later
- * failure reverts and does not also release.
+ * reserve, authorize, commit, clear, confirm. A declined payment or a payment
+ * outage did not complete authorize, so compensation is release then unlock.
+ * Insufficient stock fails at reserve, so only unlock runs. Void runs only
+ * after authorize succeeded and a later step failed. Commit replaces the hold,
+ * so a later failure reverts and does not also release.
  */
 @Service
 public class OrderSagaOrchestrator {
@@ -100,7 +101,7 @@ public class OrderSagaOrchestrator {
             reservationId = reservation.id();
             completed.add(Step.RESERVE);
 
-            paymentGateway.authorize(pending.orderId(), pending.total(), simulatePaymentFailure);
+            paymentGateway.authorize(pending.orderId(), pending.total(), simulatePaymentFailure, bearerToken);
             completed.add(Step.AUTHORIZE_PAYMENT);
 
             inventoryClient.commit(reservationId, bearerToken);
@@ -133,7 +134,7 @@ public class OrderSagaOrchestrator {
                 switch (step) {
                     case CLEAR_CART -> cartClient.restore(cartId, bearerToken);
                     case COMMIT -> inventoryClient.revert(reservationId, bearerToken);
-                    case AUTHORIZE_PAYMENT -> paymentGateway.voidAuthorization(orderId);
+                    case AUTHORIZE_PAYMENT -> paymentGateway.voidAuthorization(orderId, bearerToken);
                     case RESERVE -> inventoryClient.release(reservationId, bearerToken);
                     case LOCK_CART -> cartClient.unlock(cartId, bearerToken);
                 }
@@ -168,6 +169,9 @@ public class OrderSagaOrchestrator {
         if (ex instanceof PaymentDeclinedException) {
             return "PAYMENT_DECLINED";
         }
+        if (ex instanceof PaymentUnavailableException) {
+            return "PAYMENT_UNAVAILABLE";
+        }
         if (ex instanceof InsufficientStockException) {
             return "INSUFFICIENT_STOCK";
         }
@@ -180,6 +184,7 @@ public class OrderSagaOrchestrator {
     private static String failureMessage(String code) {
         return switch (code) {
             case "PAYMENT_DECLINED" -> "Payment was declined";
+            case "PAYMENT_UNAVAILABLE" -> "Payment service is unavailable";
             case "INSUFFICIENT_STOCK" -> "Insufficient stock to fill every line";
             case "CART_NOT_ACTIVE" -> "Cart is not active";
             default -> "Order placement failed";

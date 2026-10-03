@@ -26,11 +26,12 @@
   evidence: Catalog still has no stock. Hold, release, commit, and revert live in `services/inventory-service`. This is not a broader inventory product.
   status: Built in `services/inventory-service`.
 
-## Still deferred
+- source_spec: `_bmad-output/implementation-artifacts/spec-payment-service.md`
+  summary: Payment Service — idempotent charges the order saga calls over HTTP, with a circuit breaker on the order-service client.
+  evidence: `payment-service` owns `paymentdb` and authorizes on `orderId`. `order-service` calls it with `RestPaymentClient` (`@CircuitBreaker` name `payment`). `simulatePaymentFailure` is forwarded as `simulateDecline`. Decline and outage compensate with release then unlock and do not void.
+  status: Built in `services/payment-service`.
 
-- source_spec: none
-  summary: Payment Service — a real payment provider, with idempotency and circuit-breaker patterns.
-  evidence: Split from the original "microservices ecommerce platform" intent. `order-service` only has `MockPaymentGateway` (`simulatePaymentFailure`). No capture, no provider, no circuit breaker.
+## Still deferred
 
 - source_spec: none
   summary: Notification Service — order/payment event notifications demonstrating pub/sub, event-driven architecture.

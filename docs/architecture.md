@@ -15,7 +15,8 @@ flowchart LR
   end
 
   subgraph OrderFlow["Order flow (in-process saga)"]
-    order["order-service :8085<br/>saga + mock payment"] --- orderdb[(Postgres)]
+    order["order-service :8085<br/>saga"] --- orderdb[(Postgres)]
+    pay["payment-service :8087<br/>idempotent authorize"] --- paydb[(Postgres)]
     cart["cart-service :8083"] --- cartdb[(Postgres)]
     inv["inventory-service :8084"] --- invdb[(Postgres)]
   end
@@ -39,6 +40,7 @@ flowchart LR
   order -->|"HTTP: lock/clear/restore"| cart
   order -->|"HTTP: reserve/release"| inv
   order -->|"HTTP: price lookup"| catalog
+  order -->|"HTTP: authorize/void<br/>circuit breaker"| pay
   portal -.->|"catalog:write token"| catalog
 
   elig -->|cache| redis
@@ -46,9 +48,7 @@ flowchart LR
   elig -->|"Feign / LoadBalanced"| profile
   elig -->|"@CircuitBreaker"| bureau
 
-  pay[/"Payment Service (planned)"/]:::planned
   notif[/"Notification Service (planned)"/]:::planned
-  order -.-> pay
   order -.-> notif
 
   classDef planned stroke-dasharray: 5 5,fill:#f6f6f6,color:#666;
@@ -58,6 +58,7 @@ flowchart LR
 
 **Notes**
 - Ports come from `docker-compose.yml`.
-- Edges from `order-service` come from its `CART_SERVICE_URL`, `INVENTORY_SERVICE_URL` and `CATALOG_SERVICE_URL` settings.
+- Edges from `order-service` come from its `CART_SERVICE_URL`, `INVENTORY_SERVICE_URL`, `CATALOG_SERVICE_URL`, and `PAYMENT_SERVICE_URL` settings.
+- The payment edge is authorize and void. A Resilience4j circuit breaker named `payment` sits on the order-service client. Declines do not open it. An open circuit fails authorize as `PAYMENT_UNAVAILABLE`.
 - The portal-to-catalog edge is token issuance, not a runtime call: catalog validates tokens the portal signs.
 - Not verified: which other services (cart, inventory) validate portal tokens.

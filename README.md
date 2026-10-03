@@ -12,6 +12,7 @@ services/
   cart-service/             # Cart — per-user carts the order saga can lock, clear, and restore
   inventory-service/        # Inventory — stock and all-or-nothing reservations (optimistic locking)
   order-service/            # Order — place an order with an in-process saga
+  payment-service/          # Payment — idempotent authorize and void for the order saga
 ```
 
 Each service:
@@ -208,20 +209,37 @@ so a demo can seed units. Reservation commands require the user JWT.
 | POST | `/api/v1/inventory/reservations/{id}/commit` | Drop reserved; available stays down. |
 | POST | `/api/v1/inventory/reservations/{id}/revert` | Restore available after commit. |
 
+### payment-service
+
+Idempotent charges. Own database `paymentdb`. The acquirer is simulated:
+`simulateDecline` and `simulateOutage` force a decline or a 503, and there
+is no Stripe account. See [`services/payment-service`](services/payment-service).
+
+Host port **8087**. Postgres is not published on a host port. Routes require
+the auth-service user JWT (`JWT_SECRET`, `sub` = user id).
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| POST | `/api/v1/payments/authorizations` | Authorize `{orderId, amount, currency, simulateDecline?, simulateOutage?}`. 201 new, 200 replay. |
+| POST | `/api/v1/payments/authorizations/{orderId}/void` | Void. Missing row is an empty 200 and inserts nothing. |
+
+The same user, order, amount, and currency replays one `AUTHORIZED` row. A different amount or currency is 409 `PAYMENT_CONFLICT`. A stored `AUTHORIZED` or `VOIDED` row wins over a later `simulateDecline`. Decline and outage store nothing when no row exists.
+
 ### order-service
 
 Checkout. `OrderSagaOrchestrator` is the only coordinator. It calls the
 other services with Spring `RestClient` (`CartClient`, `InventoryClient`,
-`CatalogClient`) and a `MockPaymentGateway`. There is no broker. See
+`CatalogClient`, `RestPaymentClient`). There is no broker. See
 [`services/order-service`](services/order-service) for the full step list.
 
 Host port **8085**. Database `orderdb`. Compose sets `CART_SERVICE_URL`,
-`INVENTORY_SERVICE_URL`, `CATALOG_SERVICE_URL`, and `JWT_SECRET`.
+`INVENTORY_SERVICE_URL`, `CATALOG_SERVICE_URL`, `PAYMENT_SERVICE_URL`, and `JWT_SECRET`.
 
 `POST /api/v1/orders` with `{cartId, simulatePaymentFailure?}`.
+`simulatePaymentFailure` is forwarded to payment as `simulateDecline`.
 Happy path is 201 `CONFIRMED`. A compensated failure is 409
-`{orderId, status: CANCELLED, code, message}` (`PAYMENT_DECLINED` or
-`INSUFFICIENT_STOCK`). Cancelled orders are not deleted. The cart is not
+`{orderId, status: CANCELLED, code, message}` (`PAYMENT_DECLINED`,
+`PAYMENT_UNAVAILABLE`, or `INSUFFICIENT_STOCK`). Cancelled orders are not deleted. The cart is not
 cleared before payment succeeds.
 
 Saga (forward), then compensate completed steps in reverse:
@@ -231,19 +249,25 @@ Saga (forward), then compensate completed steps in reverse:
 3. Insert `PENDING`.
 4. Lock the cart (compensate: unlock).
 5. Reserve stock (compensate: release).
-6. Authorize mock payment (compensate: void — only if this step completed).
+6. Authorize payment over HTTP (compensate: void — only if this step completed).
 7. Commit the reservation (compensate: revert).
 8. Clear the cart (compensate: restore).
 9. Mark `CONFIRMED`.
 
-A declined payment (`simulatePaymentFailure: true`) did not complete
-authorize, so the compensation is release then unlock. Insufficient stock
+A declined payment (`simulatePaymentFailure: true`) or a payment outage
+(HTTP 5xx, timeout, connection failure, or an open circuit) did not complete
+authorize, so the compensation is release then unlock. Decline is
+`PAYMENT_DECLINED`. Outage is `PAYMENT_UNAVAILABLE`. Insufficient stock
 fails at reserve, so only unlock runs.
+
+The circuit breaker named `payment` is on the order-service client: window 10,
+minimum 5 calls, 50% failure rate, 10 seconds open. Declines do not open it.
+An open circuit fails the next payment call immediately as `PAYMENT_UNAVAILABLE`.
 
 **Tradeoff:** compensation is immediate and easy to test, and a crash
 mid-request is not replayed. A `PENDING` order and a `LOCKED` cart can
-remain if the process dies. That recovery job is out of scope. There is
-no real payment provider.
+remain if the process dies. That recovery job is out of scope. Payment is
+the simulated acquirer in `payment-service`.
 
 ### Service-to-service (S2S) auth flow
 
@@ -351,6 +375,7 @@ network:
 | `inventory-service` | 8084 |
 | `order-service` | 8085 |
 | `eligibility-api` | 8086 (plus `eligibility-redis` 6379, `eligibility-eureka` 8761) |
+| `payment-service` | 8087 |
 
 Each service's Postgres data persists across restarts in its own named
 volume; Flyway migrations re-apply idempotently on every boot.
@@ -392,7 +417,7 @@ a token, and uses it to create a category and a product end-to-end.
 ## Running the tests
 
 ```bash
-cd services/auth-service   # or product-catalog-service, api-portal-service, cart-service, inventory-service, order-service, eligibility-api
+cd services/auth-service   # or product-catalog-service, api-portal-service, cart-service, inventory-service, order-service, payment-service, eligibility-api
 mvn test
 ```
 
@@ -409,11 +434,11 @@ ecommerce platform" scope and deliberately **not** built here — see
 for details:
 
 - API Gateway
-- Payment Service (a real provider — order-service ships a mock decline switch only)
 - Notification Service
 
-Product Catalog, API Portal, Cart, the minimal Inventory service, and Order
-(in-process saga, mock payment) are built — see the service sections above.
+Product Catalog, API Portal, Cart, the minimal Inventory service, Order
+(in-process saga), and Payment (idempotent authorize/void; circuit breaker
+on the order client) are built — see the service sections above.
 Durable saga crash recovery is not built; see `order-service`.
 
 **`api-portal-service` is not an API Gateway.** It issues and lets a

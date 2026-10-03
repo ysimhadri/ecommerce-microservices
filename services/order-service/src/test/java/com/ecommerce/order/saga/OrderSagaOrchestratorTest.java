@@ -14,6 +14,7 @@ import com.ecommerce.order.exception.OrderExceptions.CartForbiddenException;
 import com.ecommerce.order.exception.OrderExceptions.CompensatedOrderException;
 import com.ecommerce.order.exception.OrderExceptions.InsufficientStockException;
 import com.ecommerce.order.exception.OrderExceptions.PaymentDeclinedException;
+import com.ecommerce.order.exception.OrderExceptions.PaymentUnavailableException;
 import com.ecommerce.order.exception.OrderExceptions.ProductNotFoundException;
 import com.ecommerce.order.model.OrderStatus;
 import com.ecommerce.order.payment.PaymentGateway;
@@ -45,8 +46,8 @@ import static org.mockito.Mockito.when;
 
 /**
  * Ports are mocked. Compensation is asserted in reverse, and only for steps
- * that completed: payment decline releases then unlocks (no void); insufficient
- * stock only unlocks; a failure after commit also reverts and voids.
+ * that completed: payment decline and payment outage release then unlock (no void);
+ * insufficient stock only unlocks; a failure after commit also reverts and voids.
  */
 @ExtendWith(MockitoExtension.class)
 class OrderSagaOrchestratorTest {
@@ -97,7 +98,7 @@ class OrderSagaOrchestratorTest {
         InOrder inOrder = inOrder(cartClient, inventoryClient, paymentGateway, orderCommandService);
         inOrder.verify(cartClient).lock(cartId, TOKEN);
         inOrder.verify(inventoryClient).reserve(eq(orderId), any(), eq(TOKEN));
-        inOrder.verify(paymentGateway).authorize(eq(orderId), any(), eq(false));
+        inOrder.verify(paymentGateway).authorize(eq(orderId), any(), eq(false), eq(TOKEN));
         inOrder.verify(inventoryClient).commit(reservationId, TOKEN);
         inOrder.verify(cartClient).clear(cartId, TOKEN);
         inOrder.verify(orderCommandService).confirm(orderId);
@@ -105,7 +106,7 @@ class OrderSagaOrchestratorTest {
         verify(inventoryClient, never()).release(any(), any());
         verify(inventoryClient, never()).revert(any(), any());
         verify(cartClient, never()).unlock(any(), any());
-        verify(paymentGateway, never()).voidAuthorization(any());
+        verify(paymentGateway, never()).voidAuthorization(any(), any());
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<PricedLine>> priced = ArgumentCaptor.forClass(List.class);
@@ -133,7 +134,7 @@ class OrderSagaOrchestratorTest {
         inOrder.verify(cartClient).clear(cartId, TOKEN);
         inOrder.verify(cartClient).restore(cartId, TOKEN);
         inOrder.verify(inventoryClient).revert(reservationId, TOKEN);
-        inOrder.verify(paymentGateway).voidAuthorization(orderId);
+        inOrder.verify(paymentGateway).voidAuthorization(orderId, TOKEN);
         inOrder.verify(cartClient).unlock(cartId, TOKEN);
         inOrder.verify(orderCommandService).cancel(orderId, "SAGA_FAILED");
         verify(inventoryClient, never()).release(any(), any());
@@ -145,7 +146,7 @@ class OrderSagaOrchestratorTest {
         when(inventoryClient.reserve(eq(orderId), any(), eq(TOKEN)))
                 .thenReturn(new ReservationSnapshot(reservationId, orderId, "HELD"));
         doThrow(new PaymentDeclinedException("Payment was declined"))
-                .when(paymentGateway).authorize(eq(orderId), any(), eq(true));
+                .when(paymentGateway).authorize(eq(orderId), any(), eq(true), eq(TOKEN));
 
         assertThatThrownBy(() -> orchestrator.place(userId, TOKEN, cartId, true))
                 .isInstanceOf(CompensatedOrderException.class)
@@ -154,11 +155,41 @@ class OrderSagaOrchestratorTest {
         InOrder inOrder = inOrder(cartClient, inventoryClient, paymentGateway, orderCommandService);
         inOrder.verify(cartClient).lock(cartId, TOKEN);
         inOrder.verify(inventoryClient).reserve(eq(orderId), any(), eq(TOKEN));
-        inOrder.verify(paymentGateway).authorize(eq(orderId), any(), eq(true));
+        inOrder.verify(paymentGateway).authorize(eq(orderId), any(), eq(true), eq(TOKEN));
         inOrder.verify(inventoryClient).release(reservationId, TOKEN);
         inOrder.verify(cartClient).unlock(cartId, TOKEN);
         inOrder.verify(orderCommandService).cancel(orderId, "PAYMENT_DECLINED");
-        verify(paymentGateway, never()).voidAuthorization(any());
+        verify(paymentGateway, never()).voidAuthorization(any(), any());
+        verify(inventoryClient, never()).commit(any(), any());
+        verify(inventoryClient, never()).revert(any(), any());
+        verify(cartClient, never()).clear(any(), any());
+        verify(cartClient, never()).restore(any(), any());
+    }
+
+    @Test
+    void paymentOutage_releasesThenUnlocks_andDoesNotVoid() {
+        stubPricedCart();
+        when(inventoryClient.reserve(eq(orderId), any(), eq(TOKEN)))
+                .thenReturn(new ReservationSnapshot(reservationId, orderId, "HELD"));
+        doThrow(new PaymentUnavailableException("Payment service is unavailable"))
+                .when(paymentGateway).authorize(eq(orderId), any(), eq(false), eq(TOKEN));
+
+        assertThatThrownBy(() -> orchestrator.place(userId, TOKEN, cartId, false))
+                .isInstanceOf(CompensatedOrderException.class)
+                .satisfies(ex -> {
+                    CompensatedOrderException compensated = (CompensatedOrderException) ex;
+                    assertThat(compensated.getCode()).isEqualTo("PAYMENT_UNAVAILABLE");
+                    assertThat(compensated.getMessage()).isEqualTo("Payment service is unavailable");
+                });
+
+        InOrder inOrder = inOrder(cartClient, inventoryClient, paymentGateway, orderCommandService);
+        inOrder.verify(cartClient).lock(cartId, TOKEN);
+        inOrder.verify(inventoryClient).reserve(eq(orderId), any(), eq(TOKEN));
+        inOrder.verify(paymentGateway).authorize(eq(orderId), any(), eq(false), eq(TOKEN));
+        inOrder.verify(inventoryClient).release(reservationId, TOKEN);
+        inOrder.verify(cartClient).unlock(cartId, TOKEN);
+        inOrder.verify(orderCommandService).cancel(orderId, "PAYMENT_UNAVAILABLE");
+        verify(paymentGateway, never()).voidAuthorization(any(), any());
         verify(inventoryClient, never()).commit(any(), any());
         verify(inventoryClient, never()).revert(any(), any());
         verify(cartClient, never()).clear(any(), any());
@@ -182,7 +213,7 @@ class OrderSagaOrchestratorTest {
         inOrder.verify(orderCommandService).cancel(orderId, "INSUFFICIENT_STOCK");
         verify(inventoryClient, never()).release(any(), any());
         verify(inventoryClient, never()).commit(any(), any());
-        verify(paymentGateway, never()).authorize(any(), any(), anyBoolean());
+        verify(paymentGateway, never()).authorize(any(), any(), anyBoolean(), any());
         verify(cartClient, never()).clear(any(), any());
     }
 
@@ -200,7 +231,7 @@ class OrderSagaOrchestratorTest {
         InOrder inOrder = inOrder(inventoryClient, paymentGateway, cartClient, orderCommandService);
         inOrder.verify(inventoryClient).commit(reservationId, TOKEN);
         inOrder.verify(inventoryClient).revert(reservationId, TOKEN);
-        inOrder.verify(paymentGateway).voidAuthorization(orderId);
+        inOrder.verify(paymentGateway).voidAuthorization(orderId, TOKEN);
         inOrder.verify(cartClient).unlock(cartId, TOKEN);
         verify(inventoryClient, never()).release(any(), any());
         inOrder.verify(orderCommandService).cancel(orderId, "SAGA_FAILED");

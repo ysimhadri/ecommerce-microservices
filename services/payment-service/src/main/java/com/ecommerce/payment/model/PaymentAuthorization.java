@@ -1,4 +1,4 @@
-package com.ecommerce.order.model;
+package com.ecommerce.payment.model;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -17,9 +17,8 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * Local record of the mock payment step. A decline does not insert a row,
- * because that step did not complete. Void is the compensation when a later
- * saga step fails after authorize succeeded.
+ * One charge per order. A decline or an outage does not insert a row.
+ * Void is the compensation after authorize completed and a later saga step failed.
  */
 @Entity
 @Table(name = "payment_authorizations")
@@ -32,8 +31,14 @@ public class PaymentAuthorization implements Persistable<UUID> {
     @Column(name = "order_id", nullable = false, updatable = false, unique = true)
     private UUID orderId;
 
+    @Column(name = "user_id", nullable = false, updatable = false)
+    private UUID userId;
+
     @Column(nullable = false, precision = 12, scale = 2)
     private BigDecimal amount;
+
+    @Column(nullable = false, length = 3)
+    private String currency;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 255)
@@ -52,10 +57,12 @@ public class PaymentAuthorization implements Persistable<UUID> {
         // JPA
     }
 
-    public PaymentAuthorization(UUID orderId, BigDecimal amount, PaymentStatus status) {
+    public PaymentAuthorization(UUID orderId, UUID userId, BigDecimal amount, String currency) {
         this.orderId = orderId;
+        this.userId = userId;
         this.amount = amount;
-        this.status = status;
+        this.currency = currency;
+        this.status = PaymentStatus.AUTHORIZED;
         this.createdAt = Instant.now();
         this.updatedAt = this.createdAt;
     }
@@ -80,8 +87,16 @@ public class PaymentAuthorization implements Persistable<UUID> {
         return orderId;
     }
 
+    public UUID getUserId() {
+        return userId;
+    }
+
     public BigDecimal getAmount() {
         return amount;
+    }
+
+    public String getCurrency() {
+        return currency;
     }
 
     public PaymentStatus getStatus() {
